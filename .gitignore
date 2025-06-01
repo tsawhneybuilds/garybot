@@ -113,4 +113,5 @@ logs/
 *.log
 chromatest.db
 chromadb/
-*.db 
+*.db
+backups/ 

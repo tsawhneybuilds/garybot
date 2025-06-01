@@ -9,6 +9,7 @@ import traceback
 from src.gary_bot import GaryBot
 from src.config import get_config, validate_config, print_config_summary, AVAILABLE_GROQ_MODELS, CONTENT_TYPES
 from src.models import GeneratedPostDraft, ViralSnippetCandidate
+from src.backup_system import BackupSystem
 
 # Page configuration
 st.set_page_config(
@@ -615,6 +616,84 @@ def manage_rag_page(gary_bot: GaryBot):
                     st.rerun()
                 else:
                     st.error("❌ Failed to reset system.")
+    
+    st.markdown("---")
+    
+    # Backup System Section
+    st.subheader("💾 Backup & Data Protection")
+    st.markdown("**Protect your RAG data:** Create backups to ensure your posts are never lost.")
+    
+    try:
+        config = get_config()
+        backup_system = BackupSystem(config.db_path)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📦 Create Backup", type="primary"):
+                with st.spinner("Creating backup..."):
+                    try:
+                        backup_path = backup_system.create_backup()
+                        st.success(f"✅ Backup created successfully!")
+                        st.info(f"📁 Saved to: {backup_path}")
+                    except Exception as e:
+                        st.error(f"❌ Backup failed: {str(e)}")
+        
+        with col2:
+            if st.button("🔄 Auto Backup", type="secondary"):
+                with st.spinner("Creating auto backup with cleanup..."):
+                    try:
+                        backup_path = backup_system.auto_backup(max_backups=10)
+                        st.success(f"✅ Auto backup completed!")
+                        st.info(f"📁 Latest backup: {backup_path}")
+                    except Exception as e:
+                        st.error(f"❌ Auto backup failed: {str(e)}")
+        
+        with col3:
+            if st.button("📄 Export JSON", type="secondary"):
+                with st.spinner("Exporting posts to JSON..."):
+                    try:
+                        export_path = backup_system.export_posts_json()
+                        st.success(f"✅ Posts exported!")
+                        st.info(f"📁 Saved to: {export_path}")
+                    except Exception as e:
+                        st.error(f"❌ Export failed: {str(e)}")
+        
+        # List existing backups
+        with st.expander("📋 View Existing Backups", expanded=False):
+            try:
+                backups = backup_system.list_backups()
+                if backups:
+                    st.markdown(f"**Found {len(backups)} backup(s):**")
+                    for backup in backups[:10]:  # Show latest 10
+                        col_info, col_action = st.columns([3, 1])
+                        with col_info:
+                            st.markdown(f"• **{backup['filename']}** ({backup['size_mb']} MB)")
+                            st.caption(f"Created: {backup['created_at']}")
+                        with col_action:
+                            if st.button("📥 Restore", key=f"restore_{backup['filename']}", help="⚠️ This will overwrite current data!"):
+                                if st.session_state.get(f"confirm_restore_{backup['filename']}", False):
+                                    with st.spinner("Restoring backup..."):
+                                        try:
+                                            success = backup_system.restore_backup(backup['path'], overwrite=True)
+                                            if success:
+                                                st.success("✅ Backup restored successfully!")
+                                                st.info("🔄 Please refresh the page to see changes.")
+                                            else:
+                                                st.error("❌ Failed to restore backup")
+                                        except Exception as e:
+                                            st.error(f"❌ Restore failed: {str(e)}")
+                                        st.session_state[f"confirm_restore_{backup['filename']}"] = False
+                                else:
+                                    st.session_state[f"confirm_restore_{backup['filename']}"] = True
+                                    st.warning("⚠️ Click again to confirm restore (will overwrite current data)")
+                else:
+                    st.info("📭 No backups found. Create your first backup above!")
+            except Exception as e:
+                st.error(f"❌ Error listing backups: {str(e)}")
+                
+    except Exception as e:
+        st.error(f"❌ Error initializing backup system: {str(e)}")
     
     st.markdown("---")
     

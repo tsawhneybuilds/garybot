@@ -1,0 +1,11 @@
+[build]
+  command = "pip install -r requirements-demo.txt && streamlit run app_demo.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true"
+  publish = "."
+
+[build.environment]
+  PYTHON_VERSION = "3.11"
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/streamlit"
+  status = 200 
