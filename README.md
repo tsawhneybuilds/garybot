@@ -59,30 +59,71 @@ MIN_SIMILARITY_THRESHOLD=0.3
 streamlit run app.py
 ```
 
-## 🌐 Deployment on Netlify
+## 🌐 Deployment on Google Cloud
 
-### Environment Variables Setup
-In your Netlify site settings, add these environment variables:
+### Google Cloud Run Deployment
 
-```
-GROQ_API_KEY=your_actual_groq_api_key
-LLM_MODEL=llama3-70b-8192
-EMBEDDING_MODEL=all-MiniLM-L6-v2
-RAG_RETRIEVAL_COUNT=3
-DEFAULT_TEMPERATURE=0.7
-MIN_SIMILARITY_THRESHOLD=0.3
-```
+Gary Bot is designed to run on Google Cloud Run for scalable, serverless deployment.
 
-### Deployment Steps
-1. **Connect Repository**: Link your GitHub repository to Netlify
-2. **Configure Build Settings**:
-   - Build command: `pip install -r requirements.txt && streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true`
-   - Publish directory: `.`
-3. **Set Environment Variables**: Add all required variables in Site Settings > Environment Variables
-4. **Deploy**: Netlify will automatically build and deploy your app
+#### Prerequisites
+- Google Cloud account with billing enabled
+- Google Cloud CLI installed
+- Docker installed (optional, for local testing)
+
+#### Deployment Steps
+
+1. **Enable Required APIs**:
+   ```bash
+   gcloud services enable run.googleapis.com
+   gcloud services enable cloudbuild.googleapis.com
+   ```
+
+2. **Set Environment Variables**:
+   Create environment variables in Google Cloud Run:
+   ```bash
+   GROQ_API_KEY=your_actual_groq_api_key
+   LLM_MODEL=llama3-70b-8192
+   EMBEDDING_MODEL=all-MiniLM-L6-v2
+   RAG_RETRIEVAL_COUNT=3
+   DEFAULT_TEMPERATURE=0.7
+   MIN_SIMILARITY_THRESHOLD=0.3
+   ```
+
+3. **Deploy to Cloud Run**:
+   ```bash
+   gcloud run deploy gary-bot \
+     --source . \
+     --platform managed \
+     --region us-central1 \
+     --allow-unauthenticated \
+     --set-env-vars="GROQ_API_KEY=your_api_key_here"
+   ```
+
+#### Alternative: Google App Engine
+
+You can also deploy to Google App Engine for a managed platform:
+
+1. Create `app.yaml`:
+   ```yaml
+   runtime: python311
+   
+   env_variables:
+     GROQ_API_KEY: "your_api_key_here"
+     LLM_MODEL: "llama3-70b-8192"
+     EMBEDDING_MODEL: "all-MiniLM-L6-v2"
+   
+   automatic_scaling:
+     min_instances: 0
+     max_instances: 10
+   ```
+
+2. Deploy:
+   ```bash
+   gcloud app deploy
+   ```
 
 ### Security Notes
-- ✅ Environment variables are securely stored in Netlify
+- ✅ Environment variables are securely stored in Google Cloud
 - ✅ API keys are never exposed in the codebase
 - ✅ Database files are excluded from version control
 - ✅ Backup files are gitignored for security
