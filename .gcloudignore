@@ -1,0 +1,10 @@
+venv/
+.git/
+chroma_db/
+backups/
+__pycache__/
+*.pyc
+.env
+*.json
+.DS_Store
+node_modules/ 
