@@ -1,99 +1,123 @@
 # 🚀 Gary Bot - AI-Powered LinkedIn Post Generator
 
-An intelligent LinkedIn content generator designed specifically for Gary Lin (Co-Founder of Explo) that uses RAG (Retrieval Augmented Generation) to create viral posts based on transcripts and high-performing content.
+An intelligent LinkedIn post generator designed specifically for Gary Lin (Co-Founder of Explo) that uses RAG (Retrieval Augmented Generation) to create viral content based on high-performing posts.
 
-## 🎯 What Gary Bot Does
+## ✨ Features
 
-- **📝 Transcript Analysis**: Upload transcripts and automatically identify viral snippet candidates
-- **🤖 AI Post Generation**: Generate multiple LinkedIn post variations using Gary's authentic voice
-- **📊 RAG Learning System**: Learn from high-performing posts to improve future generations
-- **✨ Post Rewriter**: Improve existing posts using style transfer from top performers
-- **📈 Performance Analytics**: Track engagement and optimize content strategy
-- **💾 Data Persistence**: Automatic backups ensure your content library is never lost
+- **🎯 Viral Snippet Detection**: Analyzes transcripts to identify the most engaging content
+- **🤖 AI-Powered Generation**: Creates multiple post variations using Groq's Llama 3 models
+- **📚 RAG Learning System**: Learns from gold standard posts to improve future generations
+- **✨ Post Rewriter**: Improve existing posts using style from high-performing content
+- **📊 Performance Analytics**: Track engagement and optimize content strategy
+- **💾 Backup System**: Comprehensive data protection and recovery
+- **🎨 Beautiful UI**: Modern Streamlit interface with intuitive navigation
 
-## 🏠 **Local Installation (Recommended)**
+## 🏗️ Architecture
 
-Gary Bot is designed as a **local application** for security and privacy. Your API keys and content data stay on your machine.
+- **LLM**: Groq API (Llama 3 70B/8B models)
+- **Embeddings**: Sentence Transformers (all-MiniLM-L6-v2)
+- **Vector Database**: ChromaDB for RAG storage
+- **Frontend**: Streamlit web application
+- **NLP**: spaCy for text processing
 
-### Prerequisites
-- Python 3.9-3.12 (avoid 3.13+ due to dependency issues)
-- Git
+## 🚀 Quick Start
 
-### Quick Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/tsawhneybuilds/garybot.git
-   cd garybot
-   ```
-
-2. **Create virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your Groq API key
-   ```
-
-5. **Run the application**
-   ```bash
-   streamlit run app.py
-   ```
-
-### Getting a Groq API Key
-1. Visit [console.groq.com](https://console.groq.com)
-2. Sign up or log in
-3. Go to API Keys section
-4. Create a new API key
-5. Add it to your `.env` file
-
-## 🌐 **Demo Deployment**
-
-A demo version is available online that shows the interface without requiring API keys:
-
-- **Demo URL**: [Your Netlify URL here]
-- **Features**: Interface preview, sample data, no AI functionality
-- **Purpose**: Showcase the tool's capabilities
-
-## 🔧 **Usage**
-
-### Command Line Interface
+### 1. Clone the Repository
 ```bash
-# Add sample posts with auto-enhancement
-python add_posts_to_rag.py sample
-
-# Interactive post management
-python add_posts_to_rag.py list
-python add_posts_to_rag.py delete
-
-# Post rewriting
-python add_posts_to_rag.py rewrite
-
-# Backup management
-python backup_manager.py create
-python backup_manager.py list
+git clone https://github.com/yourusername/garybot.git
+cd garybot
 ```
 
-### Web Interface
-1. **Generate Posts**: Upload transcripts → Get viral candidates → Generate posts
-2. **Post Rewriter**: Improve existing posts using high-performer styles
-3. **Manage RAG**: Add gold standard posts, bulk operations, system cleanup
-4. **Post History**: View, filter, and manage all generated content
-5. **System Stats**: Analytics and performance metrics
-6. **Settings**: Configuration and setup instructions
+### 2. Set Up Environment
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+```
 
-## 📊 **Gary's Content Types**
+### 3. Configure Environment Variables
+Create a `.env` file in the project root:
+```bash
+GROQ_API_KEY=your_groq_api_key_here
+LLM_MODEL=llama3-70b-8192
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+RAG_RETRIEVAL_COUNT=3
+DEFAULT_TEMPERATURE=0.7
+MIN_SIMILARITY_THRESHOLD=0.3
+```
 
-Gary Bot specializes in 5 specific content types:
+**Get your Groq API key:**
+1. Visit [console.groq.com](https://console.groq.com)
+2. Sign up or log in
+3. Navigate to API Keys section
+4. Create a new API key
+5. Copy it to your `.env` file
+
+### 4. Run the Application
+```bash
+streamlit run app.py
+```
+
+## 🌐 Deployment on Netlify
+
+### Environment Variables Setup
+In your Netlify site settings, add these environment variables:
+
+```
+GROQ_API_KEY=your_actual_groq_api_key
+LLM_MODEL=llama3-70b-8192
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+RAG_RETRIEVAL_COUNT=3
+DEFAULT_TEMPERATURE=0.7
+MIN_SIMILARITY_THRESHOLD=0.3
+```
+
+### Deployment Steps
+1. **Connect Repository**: Link your GitHub repository to Netlify
+2. **Configure Build Settings**:
+   - Build command: `pip install -r requirements.txt && streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true`
+   - Publish directory: `.`
+3. **Set Environment Variables**: Add all required variables in Site Settings > Environment Variables
+4. **Deploy**: Netlify will automatically build and deploy your app
+
+### Security Notes
+- ✅ Environment variables are securely stored in Netlify
+- ✅ API keys are never exposed in the codebase
+- ✅ Database files are excluded from version control
+- ✅ Backup files are gitignored for security
+
+## 📖 Usage Guide
+
+### Adding Gold Standard Posts
+1. Navigate to "⚙️ Manage RAG"
+2. Use the "Add Gold Standard Post" form
+3. Enable auto-enhancement for automatic keyword/content type extraction
+4. Posts are automatically categorized into Gary's 5 content types
+
+### Generating New Posts
+1. Go to "📝 Generate Posts"
+2. Upload a transcript (.txt file)
+3. Review viral snippet candidates
+4. Generate multiple variations
+5. Approve and save the best posts
+
+### Rewriting Existing Posts
+1. Visit "✨ Post Rewriter"
+2. Paste your existing post
+3. Choose style reference options
+4. Generate improved versions
+5. Save the best rewritten posts
+
+### Managing Content
+- **Post History**: View all posts with filtering and sorting
+- **Bulk Operations**: Select and delete multiple posts
+- **Engagement Tracking**: Update likes/comments for performance analysis
+- **Backup System**: Create and restore data backups
+
+## 🎯 Gary's Content Types
+
+The system automatically categorizes content into Gary Lin's 5 specific types:
 
 1. **Founder's Personal Story & Journey**: Experiences from Palantir, Columbia, growing up
 2. **Internal Company Management & Culture**: Behind-the-scenes at Explo, team news, challenges  
@@ -101,89 +125,93 @@ Gary Bot specializes in 5 specific content types:
 4. **Analytics Trends & Insights**: Industry knowledge and perspectives
 5. **Building a SaaS/AI Company**: Fundraising, team building, PMF, selling to enterprises
 
-## 💾 **Data Persistence & Backups**
+## 🔧 Configuration
 
-Your RAG posts are automatically stored permanently in ChromaDB. Additional backup features:
+### Available Models
+- **llama3-70b-8192**: High quality, slower (recommended)
+- **llama3-8b-8192**: Faster, good quality
+- **mixtral-8x7b-32768**: Long context, versatile
+- **gemma-7b-it**: Instruction tuned
 
-- **Automatic Backups**: Create scheduled backups of your entire system
-- **JSON Exports**: Human-readable exports for easy viewing/editing
-- **Restore Functionality**: Restore from any backup point
-- **Cloud Sync**: Backup to your preferred cloud storage
+### Key Settings
+- `RAG_RETRIEVAL_COUNT`: Number of similar posts to retrieve (default: 3)
+- `DEFAULT_TEMPERATURE`: Creativity level 0-1 (default: 0.7)
+- `MIN_SIMILARITY_THRESHOLD`: Minimum similarity for viral detection (default: 0.3)
 
-```bash
-# Create backup
-python backup_manager.py create
+## 💾 Data Management
 
-# Auto backup with cleanup (keeps 10 most recent)
-python backup_manager.py auto
+### Backup System
+- **Manual Backups**: Create on-demand backups
+- **Auto Backups**: Scheduled backups with cleanup
+- **JSON Export**: Human-readable data exports
+- **Restore**: Recover from any backup point
 
-# List all backups
-python backup_manager.py list
+### Data Persistence
+- ChromaDB automatically persists in `./chroma_db/`
+- Backups stored in `./backups/`
+- All sensitive data excluded from git
 
-# Restore from backup
-python backup_manager.py restore path/to/backup.zip --overwrite
+## 🛠️ Development
+
+### Project Structure
+```
+garybot/
+├── src/
+│   ├── gary_bot.py          # Main bot orchestrator
+│   ├── content_generator.py # LLM-powered content generation
+│   ├── viral_snippet_detector.py # RAG and similarity detection
+│   ├── models.py           # Data models
+│   ├── config.py           # Configuration management
+│   └── backup_system.py    # Data backup and recovery
+├── app.py                  # Streamlit web interface
+├── add_posts_to_rag.py     # CLI interface
+├── backup_manager.py       # Standalone backup tool
+└── requirements.txt        # Python dependencies
 ```
 
-## 🔒 **Security & Privacy**
+### CLI Commands
+```bash
+# Add sample posts
+python add_posts_to_rag.py sample
 
-- **Local Data**: All content and API keys stay on your machine
-- **No Cloud Dependencies**: Works entirely offline after initial setup
-- **Encrypted Storage**: ChromaDB provides secure local storage
-- **API Key Protection**: Environment variables keep credentials safe
+# Clear default posts
+python add_posts_to_rag.py clear
 
-## 🚀 **Advanced Features**
+# Interactive post deletion
+python add_posts_to_rag.py delete
 
-### Auto-Enhancement
-- **Keyword Extraction**: AI-powered analysis extracts 3-6 relevant business keywords
-- **Content Classification**: Automatically categorizes posts into Gary's content types
-- **Engagement Prediction**: Analyzes viral potential before posting
+# List all posts
+python add_posts_to_rag.py list
 
-### Style Transfer
-- **Reference Matching**: Find similar high-performing posts for style guidance
-- **Multiple Variations**: Generate 1-5 rewritten versions with different approaches
-- **Performance Analysis**: Compare original vs improved versions
+# Rewrite existing posts
+python add_posts_to_rag.py rewrite
 
-### Bulk Operations
-- **Multi-Select**: Choose multiple posts for batch operations
-- **Bulk Delete**: Remove multiple posts with confirmation
-- **System Cleanup**: Remove default/sample posts to start fresh
+# Backup management
+python backup_manager.py create
+python backup_manager.py list
+python backup_manager.py restore
+```
 
-## 📈 **Performance Tracking**
-
-- **Gary-Specific Stats**: Separate analytics for Gary Lin vs other authors
-- **Engagement Metrics**: Track likes, comments, and total engagement
-- **Content Type Performance**: See which content types perform best
-- **Viral Score Analysis**: AI-powered engagement prediction
-
-## 🛠 **Technical Architecture**
-
-- **Backend**: Python, Groq API (Llama 3), ChromaDB
-- **Frontend**: Streamlit web interface
-- **AI Models**: Sentence Transformers for embeddings, spaCy for NLP
-- **Storage**: Local ChromaDB with automatic persistence
-- **APIs**: Groq for LLM, Hugging Face for embeddings
-
-## 📝 **Contributing**
-
-This is a personal tool for Gary Lin, but the architecture can be adapted for other creators:
+## 🤝 Contributing
 
 1. Fork the repository
-2. Modify `src/gary_lin_persona.py` for your voice/style
-3. Update `src/config.py` with your content types
-4. Customize the prompt templates in `src/content_generator.py`
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
 
-## 📄 **License**
+## 📄 License
 
-Private repository - All rights reserved.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🆘 **Support**
+## 🆘 Support
 
 For issues or questions:
-1. Check the Settings page in the web interface
-2. Review the console output for error messages
-3. Ensure your `.env` file is properly configured
+1. Check the GitHub Issues page
+2. Review the configuration guide
+3. Ensure all environment variables are set correctly
 4. Verify your Groq API key is valid
 
 ---
 
-**🎯 Gary Bot helps you create authentic, engaging LinkedIn content that resonates with your audience while maintaining your unique founder voice.**
+**Built with ❤️ for viral LinkedIn content generation**

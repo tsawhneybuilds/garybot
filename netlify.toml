@@ -1,5 +1,5 @@
 [build]
-  command = "pip install -r requirements-demo.txt && streamlit run app_demo.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true"
+  command = "pip install -r requirements.txt && streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true"
   publish = "."
 
 [build.environment]

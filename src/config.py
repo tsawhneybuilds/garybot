@@ -45,12 +45,7 @@ class AppConfig(BaseSettings):
     }
 
 def get_config() -> AppConfig:
-    """
-    Get application configuration.
-    
-    Returns:
-        AppConfig instance with all settings
-    """
+    """Get configuration from environment variables."""
     return AppConfig()
 
 def validate_config(config: AppConfig) -> bool:
