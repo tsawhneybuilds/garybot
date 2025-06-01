@@ -61,66 +61,57 @@ streamlit run app.py
 
 ## 🌐 Deployment on Google Cloud
 
-### Google Cloud Run Deployment
+### Google App Engine (PaaS) Deployment
 
-Gary Bot is designed to run on Google Cloud Run for scalable, serverless deployment.
+Gary Bot is configured for Google App Engine, Google's fully managed Platform-as-a-Service.
 
 #### Prerequisites
 - Google Cloud account with billing enabled
-- Google Cloud CLI installed
-- Docker installed (optional, for local testing)
+- Google Cloud CLI installed (`gcloud`)
 
-#### Deployment Steps
+#### Step-by-Step Deployment
 
-1. **Enable Required APIs**:
+1. **Install Google Cloud CLI** (if not already installed):
    ```bash
-   gcloud services enable run.googleapis.com
-   gcloud services enable cloudbuild.googleapis.com
-   ```
-
-2. **Set Environment Variables**:
-   Create environment variables in Google Cloud Run:
-   ```bash
-   GROQ_API_KEY=your_actual_groq_api_key
-   LLM_MODEL=llama3-70b-8192
-   EMBEDDING_MODEL=all-MiniLM-L6-v2
-   RAG_RETRIEVAL_COUNT=3
-   DEFAULT_TEMPERATURE=0.7
-   MIN_SIMILARITY_THRESHOLD=0.3
-   ```
-
-3. **Deploy to Cloud Run**:
-   ```bash
-   gcloud run deploy gary-bot \
-     --source . \
-     --platform managed \
-     --region us-central1 \
-     --allow-unauthenticated \
-     --set-env-vars="GROQ_API_KEY=your_api_key_here"
-   ```
-
-#### Alternative: Google App Engine
-
-You can also deploy to Google App Engine for a managed platform:
-
-1. Create `app.yaml`:
-   ```yaml
-   runtime: python311
+   # macOS
+   brew install google-cloud-sdk
    
+   # Or download from: https://cloud.google.com/sdk/docs/install
+   ```
+
+2. **Authenticate with Google Cloud**:
+   ```bash
+   gcloud auth login
+   gcloud config set project YOUR_PROJECT_ID
+   ```
+
+3. **Update Environment Variables in `app.yaml`**:
+   Edit the `app.yaml` file and replace with your actual values:
+   ```yaml
    env_variables:
-     GROQ_API_KEY: "your_api_key_here"
+     GROQ_API_KEY: "your_actual_groq_api_key"
      LLM_MODEL: "llama3-70b-8192"
      EMBEDDING_MODEL: "all-MiniLM-L6-v2"
-   
-   automatic_scaling:
-     min_instances: 0
-     max_instances: 10
+     RAG_RETRIEVAL_COUNT: "3"
+     DEFAULT_TEMPERATURE: "0.7"
+     MIN_SIMILARITY_THRESHOLD: "0.3"
    ```
 
-2. Deploy:
+4. **Deploy to App Engine**:
    ```bash
    gcloud app deploy
    ```
+
+5. **Open Your App**:
+   ```bash
+   gcloud app browse
+   ```
+
+#### Configuration Notes
+- **Runtime**: Python 3.11
+- **Auto-scaling**: 0-10 instances based on traffic
+- **Resources**: 2 CPU cores, 4GB RAM per instance
+- **Cost**: Pay only for what you use
 
 ### Security Notes
 - ✅ Environment variables are securely stored in Google Cloud
