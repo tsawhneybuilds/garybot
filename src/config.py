@@ -11,10 +11,15 @@ class AppConfig(BaseSettings):
     """Application configuration using Pydantic BaseSettings."""
     
     # API Keys
-    groq_api_key: str = Field(..., env="GROQ_API_KEY")
+    groq_api_key: Optional[str] = Field(default=None, env="GROQ_API_KEY")
+    openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
+    
+    # LLM Provider Selection
+    llm_provider: str = Field(default="groq", env="LLM_PROVIDER")  # "groq" or "openai"
     
     # Model Configuration
     llm_model: str = Field(default="llama3-70b-8192", env="LLM_MODEL")
+    openai_model: str = Field(default="gpt-4o", env="OPENAI_MODEL")  # Updated to latest flagship model
     embedding_model_name: str = Field(default="all-MiniLM-L6-v2", env="EMBEDDING_MODEL")
     
     # RAG Configuration
@@ -58,14 +63,29 @@ def validate_config(config: AppConfig) -> bool:
     Returns:
         True if configuration is valid, False otherwise
     """
-    if not config.groq_api_key:
-        print("❌ Error: GROQ_API_KEY is required but not set")
+    # Validate provider selection
+    if config.llm_provider not in ["groq", "openai"]:
+        print(f"❌ Error: LLM_PROVIDER must be 'groq' or 'openai', got '{config.llm_provider}'")
         return False
     
-    if not config.groq_api_key.startswith("gsk_"):
-        print("⚠️  Warning: GROQ_API_KEY doesn't appear to be in the correct format")
+    # Validate API keys based on provider
+    if config.llm_provider == "groq":
+        if not config.groq_api_key:
+            print("❌ Error: GROQ_API_KEY is required when using Groq provider")
+            return False
+        
+        if not config.groq_api_key.startswith("gsk_"):
+            print("⚠️  Warning: GROQ_API_KEY doesn't appear to be in the correct format")
     
-    print("✅ Configuration validated successfully")
+    elif config.llm_provider == "openai":
+        if not config.openai_api_key:
+            print("❌ Error: OPENAI_API_KEY is required when using OpenAI provider")
+            return False
+        
+        if not config.openai_api_key.startswith("sk-"):
+            print("⚠️  Warning: OPENAI_API_KEY doesn't appear to be in the correct format")
+    
+    print(f"✅ Configuration validated successfully (Provider: {config.llm_provider})")
     return True
 
 def print_config_summary(config: AppConfig) -> None:
@@ -77,7 +97,13 @@ def print_config_summary(config: AppConfig) -> None:
     """
     print("🚀 Gary Bot Configuration Summary")
     print("=" * 40)
-    print(f"LLM Model: {config.llm_model}")
+    print(f"LLM Provider: {config.llm_provider.upper()}")
+    if config.llm_provider == "groq":
+        print(f"Groq Model: {config.llm_model}")
+        print(f"Groq API Key: {'✅ Set' if config.groq_api_key else '❌ Missing'}")
+    elif config.llm_provider == "openai":
+        print(f"OpenAI Model: {config.openai_model}")
+        print(f"OpenAI API Key: {'✅ Set' if config.openai_api_key else '❌ Missing'}")
     print(f"Embedding Model: {config.embedding_model_name}")
     print(f"RAG Retrieval Count: {config.rag_retrieval_count}")
     print(f"Database Path: {config.db_path}")
@@ -85,15 +111,29 @@ def print_config_summary(config: AppConfig) -> None:
     print(f"Segment Length: {config.min_segment_length}-{config.max_segment_length} chars")
     print(f"Similarity Threshold: {config.min_similarity_threshold}")
     print(f"Temperature: {config.default_temperature}")
-    print(f"API Key: {'✅ Set' if config.groq_api_key else '❌ Missing'}")
     print("=" * 40)
 
 # Available Groq models
 AVAILABLE_GROQ_MODELS = {
+    "deepseek-r1-distill-llama-70b": "DeepSeek R1 Distill Llama 70B - Latest reasoning model",
     "llama3-70b-8192": "Llama 3 70B - High quality, slower",
     "llama3-8b-8192": "Llama 3 8B - Faster, good quality",
     "mixtral-8x7b-32768": "Mixtral 8x7B - Long context, versatile",
     "gemma-7b-it": "Gemma 7B - Instruction tuned",
+}
+
+# Available OpenAI models
+AVAILABLE_OPENAI_MODELS = {
+    "gpt-4o": "GPT-4o - Latest flagship model (Recommended)",
+    "gpt-4o-mini": "GPT-4o Mini - Fast and cost-effective",
+    "gpt-4-turbo": "GPT-4 Turbo - Balanced performance",
+    "gpt-3.5-turbo": "GPT-3.5 Turbo - Fast and affordable",
+}
+
+# LLM Provider options
+LLM_PROVIDERS = {
+    "groq": "Groq (Default) - Fast inference, open source models",
+    "openai": "OpenAI - ChatGPT models (requires API key)",
 }
 
 # Available embedding models

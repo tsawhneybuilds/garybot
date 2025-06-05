@@ -299,13 +299,19 @@ def rewrite_post_interactive(gary_bot):
         num_variations = int(input("Number of variations (1-5, default 3): ").strip() or "3")
         num_variations = max(1, min(5, num_variations))
         
+        # Custom instructions
+        print("\nCustom rewrite instructions (optional):")
+        print("Examples: 'Make it more personal', 'Add a strong hook', 'Include a call-to-action'")
+        custom_instructions = input("Enter custom instructions (or press Enter to skip): ").strip() or None
+        
         # Generate rewritten versions
         print(f"\n🔄 Generating {num_variations} rewritten versions...")
         rewritten_posts = gary_bot.rewrite_post_with_style(
             original_post=original_post,
             style_reference_id=style_reference_id,
             content_type=content_type_filter,
-            num_variations=num_variations
+            num_variations=num_variations,
+            custom_instructions=custom_instructions
         )
         
         if rewritten_posts:

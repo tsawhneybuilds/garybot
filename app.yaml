@@ -1,12 +1,15 @@
 runtime: python311
 
 env_variables:
-  GROQ_API_KEY: "your_groq_api_key_here"
+  # Note: Set GROQ_API_KEY via gcloud secrets or environment variables
+  # GROQ_API_KEY will be set via gcloud CLI or Cloud Console
   LLM_MODEL: "llama3-70b-8192"
   EMBEDDING_MODEL: "all-MiniLM-L6-v2"
-  RAG_RETRIEVAL_COUNT: "3"
+  RAG_RETRIEVAL_COUNT: "1"
   DEFAULT_TEMPERATURE: "0.7"
   MIN_SIMILARITY_THRESHOLD: "0.3"
+  TOKENIZERS_PARALLELISM: "false"
+  OMP_NUM_THREADS: "2"
 
 automatic_scaling:
   min_instances: 0
@@ -15,6 +18,21 @@ automatic_scaling:
 
 resources:
   cpu: 2
-  memory_gb: 4
+  memory_gb: 8
 
-entrypoint: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true 
+readiness_check:
+  path: "/_stcore/health"
+  timeout_sec: 60
+  check_interval_sec: 10
+  failure_threshold: 3
+  success_threshold: 1
+  app_start_timeout_sec: 600
+
+liveness_check:
+  path: "/_stcore/health"
+  timeout_sec: 60
+  check_interval_sec: 30
+  failure_threshold: 5
+  success_threshold: 1
+
+entrypoint: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true --browser.gatherUsageStats=false 

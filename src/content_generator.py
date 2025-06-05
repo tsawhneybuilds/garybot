@@ -1,30 +1,56 @@
 from groq import Groq
 from typing import List, Optional
 import re
-from src.models import GeneratedPostDraft, RAGPost
-from src.gary_lin_persona import get_gary_lin_prompt
+from src.models import GeneratedPostDraft, RAGPost, Persona
 from src.rag_system import RAGSystem
+
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 
 class ContentGenerator:
     """
-    Generates LinkedIn posts using Groq LLM in Gary Lin's voice.
+    Generates LinkedIn posts using either Groq or OpenAI LLM in Gary Lin's voice.
     """
     
-    def __init__(self, api_key: str, model: str = "llama3-70b-8192"):
+    def __init__(self, provider: str = "groq", groq_api_key: Optional[str] = None, 
+                 openai_api_key: Optional[str] = None, groq_model: str = "llama3-70b-8192",
+                 openai_model: str = "gpt-4o-mini"):
         """
-        Initialize the content generator with Groq API.
+        Initialize the content generator with either Groq or OpenAI API.
         
         Args:
-            api_key: Groq API key
-            model: LLM model to use
+            provider: "groq" or "openai"
+            groq_api_key: Groq API key (required if provider is "groq")
+            openai_api_key: OpenAI API key (required if provider is "openai")
+            groq_model: Groq model to use
+            openai_model: OpenAI model to use
         """
-        self.client = Groq(api_key=api_key)
-        self.model = model
+        self.provider = provider.lower()
+        
+        if self.provider == "groq":
+            if not groq_api_key:
+                raise ValueError("Groq API key is required when using Groq provider")
+            self.client = Groq(api_key=groq_api_key)
+            self.model = groq_model
+            
+        elif self.provider == "openai":
+            if not OPENAI_AVAILABLE:
+                raise ImportError("OpenAI package not available. Install with: pip install openai")
+            if not openai_api_key:
+                raise ValueError("OpenAI API key is required when using OpenAI provider")
+            self.client = OpenAI(api_key=openai_api_key)
+            self.model = openai_model
+            
+        else:
+            raise ValueError(f"Unsupported provider: {provider}. Use 'groq' or 'openai'")
     
     def generate_post(self, snippet: str, rag_context: str = "", 
                      temperature: float = 0.7, max_tokens: int = 1000) -> str:
         """
-        Generate a LinkedIn post based on a transcript snippet.
+        Generate a LinkedIn post based on a transcript snippet (legacy method).
         
         Args:
             snippet: Transcript snippet to base the post on
@@ -35,35 +61,10 @@ class ContentGenerator:
         Returns:
             Generated LinkedIn post text
         """
-        # Construct the prompt
+        # Use the legacy Gary Lin prompt for backward compatibility
+        from src.gary_lin_persona import get_gary_lin_prompt
         prompt = get_gary_lin_prompt(snippet, rag_context)
-        
-        try:
-            # Call Groq API
-            chat_completion = self.client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                model=self.model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                top_p=1,
-                stream=False
-            )
-            
-            # Extract the generated content
-            generated_text = chat_completion.choices[0].message.content.strip()
-            
-            # Clean up the response
-            cleaned_text = self._clean_generated_text(generated_text)
-            
-            return cleaned_text
-            
-        except Exception as e:
-            raise Exception(f"Error generating content with Groq: {str(e)}")
+        return self._generate_with_prompt(prompt, temperature, max_tokens)
     
     def generate_multiple_posts(self, snippet: str, rag_context: str = "", 
                                num_variations: int = 3, temperature: float = 0.8) -> List[str]:
@@ -94,14 +95,15 @@ class ContentGenerator:
         return posts
     
     def generate_post_with_rag(self, snippet: str, rag_system: RAGSystem, 
-                              num_rag_examples: int = 3) -> GeneratedPostDraft:
+                              num_rag_examples: int = 3, num_guidelines: int = 2) -> GeneratedPostDraft:
         """
-        Generate a post using RAG system for context.
+        Generate a LinkedIn post using RAG context from similar posts and guideline documents.
         
         Args:
             snippet: Transcript snippet to base the post on
             rag_system: RAG system instance for retrieving context
             num_rag_examples: Number of similar posts to retrieve for context
+            num_guidelines: Number of relevant guideline documents to retrieve
             
         Returns:
             GeneratedPostDraft object with the generated post and metadata
@@ -109,11 +111,24 @@ class ContentGenerator:
         # Retrieve similar posts from RAG
         similar_posts = rag_system.retrieve_similar_posts(snippet, top_k=num_rag_examples)
         
-        # Format RAG context
-        rag_context = rag_system.format_rag_context(similar_posts)
+        # Retrieve relevant guidelines
+        relevant_guidelines = rag_system.retrieve_relevant_guidelines(snippet, top_k=num_guidelines)
         
-        # Generate the post
-        generated_text = self.generate_post(snippet, rag_context)
+        # Format RAG context (posts)
+        posts_context = rag_system.format_rag_context(similar_posts)
+        
+        # Format guidelines context
+        guidelines_context = rag_system.format_guidelines_context(relevant_guidelines)
+        
+        # Combine contexts for the prompt
+        combined_context = ""
+        if guidelines_context != "No relevant guidelines found.":
+            combined_context += f"**WRITING GUIDELINES & TEMPLATES:**\n{guidelines_context}\n\n"
+        if posts_context != "No similar posts found.":
+            combined_context += f"**SIMILAR SUCCESSFUL POSTS FOR REFERENCE:**\n{posts_context}"
+        
+        # Generate the post with combined context
+        generated_text = self.generate_post(snippet, combined_context)
         
         # Extract hashtags
         hashtags = self._extract_hashtags(generated_text)
@@ -127,6 +142,183 @@ class ContentGenerator:
         )
         
         return draft
+    
+    def generate_post_with_persona(self, snippet: str, persona: Persona, rag_system: RAGSystem, 
+                                  num_rag_examples: int = 3, use_hooks: bool = True, 
+                                  num_hooks: int = 2) -> GeneratedPostDraft:
+        """
+        Generate a LinkedIn post using a specific persona with optional hooks and RAG context.
+        
+        Args:
+            snippet: Transcript snippet to base the post on
+            persona: The persona to use for generation
+            rag_system: RAG system instance for retrieving context
+            num_rag_examples: Number of similar posts to retrieve for context
+            use_hooks: Whether to include hooks in the generation
+            num_hooks: Number of hooks to retrieve if use_hooks is True
+            
+        Returns:
+            GeneratedPostDraft object with the generated post and metadata
+        """
+        # Retrieve similar posts from RAG (filtered by persona)
+        similar_posts = rag_system.retrieve_similar_posts(
+            snippet, 
+            top_k=num_rag_examples,
+            persona_id=persona.id
+        )
+        
+        # Format RAG context (posts)
+        posts_context = rag_system.format_rag_context(similar_posts)
+        
+        # Optionally retrieve relevant hooks
+        hooks_context = ""
+        if use_hooks:
+            relevant_hooks = rag_system.retrieve_relevant_guidelines(snippet, top_k=num_hooks)
+            hooks_context = rag_system.format_guidelines_context(relevant_hooks)
+        
+        # Build the persona-based prompt
+        prompt = self._build_persona_prompt(snippet, persona, posts_context, hooks_context)
+        
+        # Generate the post
+        generated_text = self._generate_with_prompt(prompt)
+        
+        # Extract hashtags
+        hashtags = self._extract_hashtags(generated_text)
+        
+        # Create the draft object
+        draft = GeneratedPostDraft(
+            original_snippet=snippet,
+            draft_text=generated_text,
+            suggested_hashtags=hashtags,
+            rag_context_ids=[post.id for post in similar_posts]
+        )
+        
+        return draft
+    
+    def _build_persona_prompt(self, snippet: str, persona: Persona, posts_context: str = "", 
+                             hooks_context: str = "") -> str:
+        """
+        Build a prompt using the persona system instead of hardcoded Gary Lin prompt.
+        
+        Args:
+            snippet: The transcript snippet
+            persona: The persona to use
+            posts_context: Context from similar posts
+            hooks_context: Context from hooks (optional)
+            
+        Returns:
+            Complete prompt for the LLM
+        """
+        # Build persona definition
+        persona_section = f"""
+**WRITING PERSONA: {persona.name}**
+
+**Description:** {persona.description}
+
+**Voice & Tone:**
+{persona.voice_tone}
+
+**Content Types:** {', '.join(persona.content_types)}
+
+**Style Guide:**
+{persona.style_guide}
+
+**Target Audience:** {persona.target_audience}
+"""
+        
+        # Add hooks section if provided
+        hooks_section = ""
+        if hooks_context and hooks_context != "No relevant guidelines found.":
+            hooks_section = f"""
+
+**WRITING HOOKS & TEMPLATES FOR INSPIRATION:**
+{hooks_context}
+"""
+        
+        # Add posts context section if provided
+        posts_section = ""
+        if posts_context and posts_context != "No similar posts found.":
+            posts_section = f"""
+
+**SIMILAR SUCCESSFUL POSTS FOR REFERENCE:**
+{posts_context}
+"""
+        
+        # Build complete prompt
+        prompt = f"""{persona_section}{hooks_section}{posts_section}
+
+**YOUR TASK:**
+Based on the following transcript snippet, write a compelling LinkedIn post in the {persona.name} voice and style.
+
+**INSTRUCTIONS:**
+1. Choose the most appropriate content type from your specialties
+2. Extract the key insight, story, or lesson from the content
+3. Transform it into an engaging post that fits your voice and audience
+4. Use your authentic tone and perspective
+5. Follow your style guide for structure and formatting
+6. Include 1-3 relevant hashtags
+7. Aim for 150-300 words
+8. Use line breaks for readability
+
+**Transcript Snippet:**
+"{snippet}"
+
+**Write the LinkedIn post now:**"""
+
+        return prompt
+    
+    def _generate_with_prompt(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1000) -> str:
+        """
+        Generate content using the provided prompt.
+        
+        Args:
+            prompt: The complete prompt to send to the LLM
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            
+        Returns:
+            Generated text
+        """
+        try:
+            # Call appropriate API based on provider
+            if self.provider == "groq":
+                chat_completion = self.client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    model=self.model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    top_p=1,
+                    stream=False
+                )
+            elif self.provider == "openai":
+                chat_completion = self.client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    model=self.model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=False
+                )
+            
+            # Extract the generated content
+            generated_text = chat_completion.choices[0].message.content.strip()
+            
+            # Clean up the response
+            cleaned_text = self._clean_generated_text(generated_text)
+            
+            return cleaned_text
+            
+        except Exception as e:
+            raise Exception(f"Error generating content with {self.provider.upper()}: {str(e)}")
     
     def _clean_generated_text(self, text: str) -> str:
         """
@@ -215,25 +407,40 @@ class ContentGenerator:
         """
         
         try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": feedback_prompt
-                    }
-                ],
-                model=self.model,
-                temperature=0.7,
-                max_tokens=1000,
-                top_p=1,
-                stream=False
-            )
+            # Call appropriate API based on provider
+            if self.provider == "groq":
+                chat_completion = self.client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": feedback_prompt
+                        }
+                    ],
+                    model=self.model,
+                    temperature=0.7,
+                    max_tokens=1000,
+                    top_p=1,
+                    stream=False
+                )
+            elif self.provider == "openai":
+                chat_completion = self.client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": feedback_prompt
+                        }
+                    ],
+                    model=self.model,
+                    temperature=0.7,
+                    max_tokens=1000,
+                    stream=False
+                )
             
             generated_text = chat_completion.choices[0].message.content.strip()
             return self._clean_generated_text(generated_text)
             
         except Exception as e:
-            raise Exception(f"Error regenerating content with feedback: {str(e)}")
+            raise Exception(f"Error regenerating content with feedback using {self.provider.upper()}: {str(e)}")
     
     def analyze_post_potential(self, post_text: str) -> dict:
         """
@@ -275,19 +482,34 @@ class ContentGenerator:
         """
         
         try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": analysis_prompt
-                    }
-                ],
-                model=self.model,
-                temperature=0.3,  # Lower temperature for more consistent analysis
-                max_tokens=500,
-                top_p=1,
-                stream=False
-            )
+            # Call appropriate API based on provider
+            if self.provider == "groq":
+                chat_completion = self.client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": analysis_prompt
+                        }
+                    ],
+                    model=self.model,
+                    temperature=0.3,  # Lower temperature for more consistent analysis
+                    max_tokens=500,
+                    top_p=1,
+                    stream=False
+                )
+            elif self.provider == "openai":
+                chat_completion = self.client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": analysis_prompt
+                        }
+                    ],
+                    model=self.model,
+                    temperature=0.3,  # Lower temperature for more consistent analysis
+                    max_tokens=500,
+                    stream=False
+                )
             
             analysis_text = chat_completion.choices[0].message.content.strip()
             
@@ -295,7 +517,7 @@ class ContentGenerator:
             return self._parse_analysis(analysis_text)
             
         except Exception as e:
-            print(f"Error analyzing post potential: {str(e)}")
+            print(f"Error analyzing post potential with {self.provider.upper()}: {str(e)}")
             return {
                 "score": 5,
                 "strengths": ["Unable to analyze"],

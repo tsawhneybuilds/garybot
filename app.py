@@ -7,7 +7,7 @@ import traceback
 
 # Import our modules
 from src.gary_bot import GaryBot
-from src.config import get_config, validate_config, print_config_summary, AVAILABLE_GROQ_MODELS, CONTENT_TYPES
+from src.config import get_config, validate_config, print_config_summary, AVAILABLE_GROQ_MODELS, AVAILABLE_OPENAI_MODELS, LLM_PROVIDERS, CONTENT_TYPES
 from src.models import GeneratedPostDraft, ViralSnippetCandidate
 from src.backup_system import BackupSystem
 
@@ -44,7 +44,8 @@ st.markdown("""
         padding: 1.5rem;
         border-radius: 10px;
         border: 2px solid #667eea;
-        background-color: white;
+        background-color: #18191A;
+        color: #fff;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
@@ -76,15 +77,56 @@ st.markdown("""
 def initialize_gary_bot():
     """Initialize GaryBot with caching to avoid reloading."""
     try:
-        config = get_config()
-        if not validate_config(config):
-            st.error("❌ Configuration validation failed. Please check your environment variables.")
+        config = get_effective_config()
+        if not validate_effective_config(config):
+            st.error("❌ Configuration validation failed. Please check your settings.")
             st.stop()
         
         return GaryBot(config)
     except Exception as e:
         st.error(f"❌ Failed to initialize GaryBot: {str(e)}")
         st.stop()
+
+def clear_gary_bot_cache():
+    """Clear the cached GaryBot instance when configuration changes."""
+    if 'initialize_gary_bot' in st.session_state:
+        del st.session_state['initialize_gary_bot']
+    initialize_gary_bot.clear()
+
+def get_effective_config():
+    """Get configuration from session state overrides or environment variables."""
+    config = get_config()
+    
+    # Override with session state values if they exist
+    if hasattr(st.session_state, 'ui_llm_provider'):
+        config.llm_provider = st.session_state.ui_llm_provider
+    
+    if hasattr(st.session_state, 'ui_groq_api_key') and st.session_state.ui_groq_api_key:
+        config.groq_api_key = st.session_state.ui_groq_api_key
+    
+    if hasattr(st.session_state, 'ui_openai_api_key') and st.session_state.ui_openai_api_key:
+        config.openai_api_key = st.session_state.ui_openai_api_key
+        
+    if hasattr(st.session_state, 'ui_groq_model'):
+        config.llm_model = st.session_state.ui_groq_model
+        
+    if hasattr(st.session_state, 'ui_openai_model'):
+        config.openai_model = st.session_state.ui_openai_model
+    
+    return config
+
+def validate_effective_config(config):
+    """Validate the effective configuration (including UI overrides)."""
+    if config.llm_provider not in ["groq", "openai"]:
+        return False
+    
+    if config.llm_provider == "groq" and not config.groq_api_key:
+        return False
+    
+    if config.llm_provider == "openai" and not config.openai_api_key:
+        return False
+    
+    return True
 
 def main():
     """Main application function."""
@@ -372,6 +414,15 @@ def post_rewriter_page(gary_bot: GaryBot):
                 st.warning("No content types available for filtering.")
                 return
         
+        # Custom Instructions Section
+        st.subheader("📝 Custom Rewrite Instructions")
+        custom_instructions = st.text_area(
+            "Add specific instructions for how you want your post rewritten:",
+            height=100,
+            placeholder="e.g., 'Make it more engaging with a strong hook', 'Add more personal storytelling', 'Include a clear call-to-action', 'Make it more concise and punchy'...",
+            help="These instructions will be sent to the AI along with your post to guide the rewriting process"
+        )
+        
         # Generate button
         if st.button("✨ Rewrite Post", type="primary"):
             with st.spinner("🔄 Rewriting your post..."):
@@ -381,7 +432,8 @@ def post_rewriter_page(gary_bot: GaryBot):
                         original_post=original_post,
                         style_reference_id=style_reference_id,
                         content_type=content_type_filter,
-                        num_variations=num_variations
+                        num_variations=num_variations,
+                        custom_instructions=custom_instructions
                     )
                     
                     if rewritten_posts:
@@ -588,429 +640,833 @@ def manage_rag_page(gary_bot: GaryBot):
     """RAG system management page."""
     
     st.header("⚙️ Manage RAG System")
-    st.markdown("Add gold standard posts and manage the knowledge base.")
+    st.markdown("Add gold standard posts, manage guideline documents, and control the knowledge base.")
     
-    # Clear default posts section
-    st.subheader("🧹 System Cleanup")
-    col1, col2, col3 = st.columns([2, 1, 1])
+    # Tab layout for better organization
+    tab1, tab2, tab3 = st.tabs(["📝 Posts Management", "📋 Guidelines", "💾 Backup & System"])
     
-    with col1:
-        st.markdown("**Remove Default Posts:** Clear sample/default posts to start fresh with your own content.")
-    
-    with col2:
-        if st.button("🗑️ Clear Default Posts", type="secondary"):
-            with st.spinner("Removing default posts..."):
-                removed_count = gary_bot.clear_default_posts()
-                if removed_count > 0:
-                    st.success(f"✅ Removed {removed_count} default posts!")
-                    st.rerun()
-                else:
-                    st.info("ℹ️ No default posts found to remove.")
-    
-    with col3:
-        if st.button("🔄 Reset System", type="secondary"):
-            with st.spinner("Resetting system..."):
-                success = gary_bot.reset_system_for_defaults()
-                if success:
-                    st.success("✅ System reset! Default posts can be added again.")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to reset system.")
-    
-    st.markdown("---")
-    
-    # Backup System Section
-    st.subheader("💾 Backup & Data Protection")
-    st.markdown("**Protect your RAG data:** Create backups to ensure your posts are never lost.")
-    
-    try:
-        config = get_config()
-        backup_system = BackupSystem(config.db_path)
-        
-        col1, col2, col3 = st.columns(3)
+    with tab3:
+        # Clear default posts section
+        st.subheader("🧹 System Cleanup")
+        col1, col2, col3 = st.columns([2, 1, 1])
         
         with col1:
-            if st.button("📦 Create Backup", type="primary"):
-                with st.spinner("Creating backup..."):
-                    try:
-                        backup_path = backup_system.create_backup()
-                        st.success(f"✅ Backup created successfully!")
-                        st.info(f"📁 Saved to: {backup_path}")
-                    except Exception as e:
-                        st.error(f"❌ Backup failed: {str(e)}")
+            st.markdown("**Remove Default Posts:** Clear sample/default posts to start fresh with your own content.")
         
         with col2:
-            if st.button("🔄 Auto Backup", type="secondary"):
-                with st.spinner("Creating auto backup with cleanup..."):
-                    try:
-                        backup_path = backup_system.auto_backup(max_backups=10)
-                        st.success(f"✅ Auto backup completed!")
-                        st.info(f"📁 Latest backup: {backup_path}")
-                    except Exception as e:
-                        st.error(f"❌ Auto backup failed: {str(e)}")
+            if st.button("🗑️ Clear Default Posts", type="secondary"):
+                with st.spinner("Removing default posts..."):
+                    removed_count = gary_bot.clear_default_posts()
+                    if removed_count > 0:
+                        st.success(f"✅ Removed {removed_count} default posts!")
+                        st.rerun()
+                    else:
+                        st.info("ℹ️ No default posts found to remove.")
         
         with col3:
-            if st.button("📄 Export JSON", type="secondary"):
-                with st.spinner("Exporting posts to JSON..."):
-                    try:
-                        export_path = backup_system.export_posts_json()
-                        st.success(f"✅ Posts exported!")
-                        st.info(f"📁 Saved to: {export_path}")
-                    except Exception as e:
-                        st.error(f"❌ Export failed: {str(e)}")
+            if st.button("🔄 Reset System", type="secondary"):
+                with st.spinner("Resetting system..."):
+                    success = gary_bot.reset_system_for_defaults()
+                    if success:
+                        st.success("✅ System reset! Default posts can be added again.")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to reset system.")
         
-        # List existing backups
-        with st.expander("📋 View Existing Backups", expanded=False):
+        st.markdown("---")
+        
+        # Backup System Section
+        st.subheader("💾 Backup & Data Protection")
+        st.markdown("**Protect your RAG data:** Create backups to ensure your posts are never lost.")
+        
+        # --- JSON Import Functionality ---
+        st.markdown("---")
+        st.subheader("📤 Import from JSON Backup")
+        uploaded_json = st.file_uploader("Upload JSON Backup", type=["json"], key="import_json_backup")
+        if uploaded_json is not None:
             try:
-                backups = backup_system.list_backups()
-                if backups:
-                    st.markdown(f"**Found {len(backups)} backup(s):**")
-                    for backup in backups[:10]:  # Show latest 10
-                        col_info, col_action = st.columns([3, 1])
-                        with col_info:
-                            st.markdown(f"• **{backup['filename']}** ({backup['size_mb']} MB)")
-                            st.caption(f"Created: {backup['created_at']}")
-                        with col_action:
-                            if st.button("📥 Restore", key=f"restore_{backup['filename']}", help="⚠️ This will overwrite current data!"):
-                                if st.session_state.get(f"confirm_restore_{backup['filename']}", False):
-                                    with st.spinner("Restoring backup..."):
-                                        try:
-                                            success = backup_system.restore_backup(backup['path'], overwrite=True)
-                                            if success:
-                                                st.success("✅ Backup restored successfully!")
-                                                st.info("🔄 Please refresh the page to see changes.")
-                                            else:
-                                                st.error("❌ Failed to restore backup")
-                                        except Exception as e:
-                                            st.error(f"❌ Restore failed: {str(e)}")
-                                        st.session_state[f"confirm_restore_{backup['filename']}"] = False
-                                else:
-                                    st.session_state[f"confirm_restore_{backup['filename']}"] = True
-                                    st.warning("⚠️ Click again to confirm restore (will overwrite current data)")
-                else:
-                    st.info("📭 No backups found. Create your first backup above!")
+                import json
+                from datetime import datetime
+                backup_data = json.load(uploaded_json)
+                num_posts = len(backup_data.get("posts", []))
+                num_guidelines = len(backup_data.get("guidelines", []))
+                export_time = backup_data.get("export_timestamp", "unknown time")
+                st.info(f"Backup from: {export_time}")
+                st.success(f"Will import {num_posts} posts and {num_guidelines} guidelines.")
+                if st.button("🚀 Import Backup", key="import_json_btn"):
+                    from src.rag_system import RAGSystem
+                    from src.models import RAGPost, GuidelineDocument
+                    rag_system = gary_bot.rag_system
+                    posts_added, posts_failed = 0, 0
+                    guidelines_added, guidelines_failed = 0, 0
+                    # Import posts
+                    for post_data in backup_data.get("posts", []):
+                        try:
+                            post = RAGPost(
+                                id=post_data['id'],
+                                title=post_data.get('title'),
+                                author=post_data.get('author'),
+                                text=post_data['text'],
+                                embedding=None,
+                                keywords=post_data.get('keywords', []),
+                                content_type=post_data.get('content_type'),
+                                source_snippet=post_data.get('source_snippet'),
+                                created_at=datetime.fromisoformat(post_data['created_at']),
+                                likes=post_data.get('likes', 0),
+                                comments=post_data.get('comments', 0),
+                                is_gold_standard=post_data.get('is_gold_standard', False),
+                                last_engagement_update_at=datetime.fromisoformat(post_data['last_engagement_update_at']) if post_data.get('last_engagement_update_at') else None
+                            )
+                            rag_system.add_post(post)
+                            posts_added += 1
+                        except Exception as e:
+                            posts_failed += 1
+                    # Import guidelines
+                    for guideline_data in backup_data.get("guidelines", []):
+                        try:
+                            guideline = GuidelineDocument(
+                                id=guideline_data['id'],
+                                title=guideline_data['title'],
+                                content=guideline_data['content'],
+                                document_type=guideline_data['document_type'],
+                                section=guideline_data.get('section'),
+                                embedding=None,
+                                created_at=datetime.fromisoformat(guideline_data['created_at']),
+                                priority=guideline_data.get('priority', 1)
+                            )
+                            rag_system.add_guideline(guideline)
+                            guidelines_added += 1
+                        except Exception as e:
+                            guidelines_failed += 1
+                    st.success(f"✅ Imported {posts_added} posts and {guidelines_added} guidelines!")
+                    if posts_failed or guidelines_failed:
+                        st.warning(f"⚠️ {posts_failed} posts and {guidelines_failed} guidelines failed to import.")
+                    st.rerun()
             except Exception as e:
-                st.error(f"❌ Error listing backups: {str(e)}")
-                
-    except Exception as e:
-        st.error(f"❌ Error initializing backup system: {str(e)}")
-    
-    st.markdown("---")
-    
-    # Add new gold standard post
-    st.subheader("➕ Add Gold Standard Post")
-    st.markdown("🤖 **Smart Features:** Keywords and content type will be automatically extracted if not provided!")
-    
-    with st.form("add_gold_standard"):
-        # Title and Author
-        col1, col2 = st.columns(2)
-        with col1:
-            title = st.text_input("Title (Optional)", placeholder="Give your post a memorable title...")
-        with col2:
-            # Author dropdown with Gary Lin as default
-            author_option = st.selectbox(
-                "Author",
-                ["Gary Lin", "Other"],
-                index=0,
-                help="Select author - only Gary Lin's posts will be included in stats"
-            )
+                st.error(f"❌ Failed to parse or import backup: {str(e)}")
+        
+        st.markdown("---")
+        
+        # Backup System Section
+        st.subheader("💾 Backup & Data Protection")
+        st.markdown("**Protect your RAG data:** Create backups to ensure your posts are never lost.")
+        
+        try:
+            config = get_config()
+            backup_system = BackupSystem(config.db_path)
             
-            if author_option == "Other":
-                author = st.text_input("Enter author name:", placeholder="e.g., John Doe...")
-            else:
-                author = "Gary Lin"
-        
-        # Post content
-        post_text = st.text_area("Post Content", height=200, placeholder="Enter a high-performing LinkedIn post...")
-        
-        # Engagement metrics
-        col1, col2 = st.columns(2)
-        with col1:
-            likes = st.number_input("Likes", min_value=0, value=0, key="add_likes")
-        with col2:
-            comments = st.number_input("Comments", min_value=0, value=0, key="add_comments")
-        
-        # Advanced options in an expander
-        with st.expander("🔧 Advanced Options (Optional)", expanded=False):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("📦 Create Backup", type="primary"):
+                    with st.spinner("Creating backup..."):
+                        try:
+                            backup_path = backup_system.create_backup()
+                            st.success(f"✅ Backup created successfully!")
+                            st.info(f"📁 Saved to: {backup_path}")
+                        except Exception as e:
+                            st.error(f"❌ Backup failed: {str(e)}")
+            
+            with col2:
+                if st.button("🔄 Auto Backup", type="secondary"):
+                    with st.spinner("Creating auto backup with cleanup..."):
+                        try:
+                            backup_path = backup_system.auto_backup(max_backups=10)
+                            st.success(f"✅ Auto backup completed!")
+                            st.info(f"📁 Latest backup: {backup_path}")
+                        except Exception as e:
+                            st.error(f"❌ Auto backup failed: {str(e)}")
+            
+            with col3:
+                if st.button("📄 Export JSON", type="secondary"):
+                    with st.spinner("Exporting posts to JSON..."):
+                        try:
+                            export_path = backup_system.export_posts_json()
+                            st.success(f"✅ Posts exported!")
+                            st.info(f"📁 Saved to: {export_path}")
+                        except Exception as e:
+                            st.error(f"❌ Export failed: {str(e)}")
+            
+            # Quick JSON Download (without saving to server)
             col1, col2 = st.columns(2)
             with col1:
-                manual_keywords = st.text_input("Manual Keywords (comma-separated)", 
-                                               placeholder="Leave empty for auto-extraction")
+                if st.button("📥 Download JSON Backup", type="primary"):
+                    with st.spinner("Preparing JSON download..."):
+                        try:
+                            from src.rag_system import RAGSystem
+                            import json
+                            
+                            # Get all posts and guidelines
+                            rag_system = RAGSystem(str(backup_system.db_path))
+                            posts = rag_system.list_all_posts()
+                            guidelines = rag_system.list_all_guidelines()
+                            
+                            # Prepare export data
+                            posts_data = []
+                            for post in posts:
+                                post_dict = {
+                                    "id": post.id,
+                                    "title": post.title,
+                                    "author": post.author,
+                                    "text": post.text,
+                                    "keywords": post.keywords,
+                                    "content_type": post.content_type,
+                                    "source_snippet": post.source_snippet,
+                                    "created_at": post.created_at.isoformat(),
+                                    "likes": post.likes,
+                                    "comments": post.comments,
+                                    "is_gold_standard": post.is_gold_standard,
+                                    "last_engagement_update_at": post.last_engagement_update_at.isoformat() if post.last_engagement_update_at else None
+                                }
+                                posts_data.append(post_dict)
+                            
+                            guidelines_data = []
+                            for guideline in guidelines:
+                                guideline_dict = {
+                                    "id": guideline.id,
+                                    "title": guideline.title,
+                                    "content": guideline.content,
+                                    "document_type": guideline.document_type,
+                                    "section": guideline.section,
+                                    "created_at": guideline.created_at.isoformat(),
+                                    "priority": guideline.priority
+                                }
+                                guidelines_data.append(guideline_dict)
+                            
+                            export_data = {
+                                "export_timestamp": datetime.now().isoformat(),
+                                "total_posts": len(posts_data),
+                                "total_guidelines": len(guidelines_data),
+                                "posts": posts_data,
+                                "guidelines": guidelines_data
+                            }
+                            
+                            # Convert to JSON string
+                            json_content = json.dumps(export_data, indent=2, ensure_ascii=False)
+                            
+                            # Create download
+                            st.download_button(
+                                label="💾 Download Complete Backup (JSON)",
+                                data=json_content,
+                                file_name=f"gary_bot_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                                mime="application/json"
+                            )
+                            
+                        except Exception as e:
+                            st.error(f"❌ Download preparation failed: {str(e)}")
+            
             with col2:
-                manual_content_type = st.selectbox("Manual Content Type", 
-                                                  ["Auto-detect"] + CONTENT_TYPES)
-        
-        submitted = st.form_submit_button("✨ Add to RAG System (Auto-Enhanced)", type="primary")
-        
-        if submitted and post_text:
-            try:
-                with st.spinner("🤖 Analyzing post and extracting metadata..."):
-                    # Prepare parameters
-                    keywords_list = None
-                    content_type = None
+                st.info("📋 **JSON Backup includes:**\n• All posts with metadata\n• All guidelines\n• Engagement data\n• Creation timestamps")
+            
+            # List existing backups
+            with st.expander("📋 View Existing Backups", expanded=False):
+                try:
+                    backups = backup_system.list_backups()
+                    if backups:
+                        st.markdown(f"**Found {len(backups)} backup(s):**")
+                        for backup in backups[:10]:  # Show latest 10
+                            col_info, col_action = st.columns([3, 1])
+                            with col_info:
+                                st.markdown(f"• **{backup['filename']}** ({backup['size_mb']} MB)")
+                                st.caption(f"Created: {backup['created_at']}")
+                            with col_action:
+                                # Download button
+                                try:
+                                    with open(backup['path'], 'rb') as f:
+                                        backup_data = f.read()
+                                    
+                                    st.download_button(
+                                        label="📥 Download",
+                                        data=backup_data,
+                                        file_name=backup['filename'],
+                                        mime="application/octet-stream",
+                                        key=f"download_{backup['filename']}"
+                                    )
+                                except Exception as e:
+                                    st.error(f"❌ Can't download: {str(e)}")
+                                
+                                if st.button("🔄 Restore", key=f"restore_{backup['filename']}", help="⚠️ This will overwrite current data!"):
+                                    if st.session_state.get(f"confirm_restore_{backup['filename']}", False):
+                                        with st.spinner("Restoring backup..."):
+                                            try:
+                                                success = backup_system.restore_backup(backup['path'], overwrite=True)
+                                                if success:
+                                                    st.success("✅ Backup restored successfully!")
+                                                    st.info("🔄 Please refresh the page to see changes.")
+                                                else:
+                                                    st.error("❌ Failed to restore backup")
+                                            except Exception as e:
+                                                st.error(f"❌ Restore failed: {str(e)}")
+                                        st.session_state[f"confirm_restore_{backup['filename']}"] = False
+                                    else:
+                                        st.session_state[f"confirm_restore_{backup['filename']}"] = True
+                                        st.warning("⚠️ Click again to confirm restore (will overwrite current data)")
+                    else:
+                        st.info("📭 No backups found. Create your first backup above!")
+                except Exception as e:
+                    st.error(f"❌ Error listing backups: {str(e)}")
                     
-                    # Use manual inputs if provided
-                    if 'manual_keywords' in locals() and manual_keywords:
-                        keywords_list = [k.strip() for k in manual_keywords.split(",") if k.strip()]
-                    
-                    if 'manual_content_type' in locals() and manual_content_type != "Auto-detect":
-                        content_type = manual_content_type
-                    
-                    # Add the post (will auto-extract if keywords/content_type are None)
-                    post_id = gary_bot.add_gold_standard_post(
-                        post_text, 
-                        keywords=keywords_list, 
-                        likes=likes, 
-                        comments=comments,
-                        content_type=content_type,
-                        title=title if title else None,
-                        author=author if author else None
-                    )
-                    
-                    st.success(f"✅ Successfully added gold standard post!")
-                    st.info("🤖 Check the console output above for extracted keywords and content type.")
-                    
-            except Exception as e:
-                st.error(f"❌ Error adding post: {str(e)}")
+        except Exception as e:
+            st.error(f"❌ Error initializing backup system: {str(e)}")
     
-    st.markdown("---")
-    
-    # Post Management Section
-    st.subheader("📚 Post Management")
-    
-    try:
-        all_posts = gary_bot.get_post_history()
+    with tab2:
+        # Guidelines Management Section
+        st.subheader("📋 Guideline Documents")
+        st.markdown("Manage writing guidelines, hooks, and templates that guide post generation.")
         
-        if all_posts:
-            # Filter options
+        # Add Built-in Guidelines
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📚 Add LinkedIn Hooks & Style Guide", type="primary"):
+                with st.spinner("Adding built-in guidelines..."):
+                    try:
+                        from src.models import GuidelineDocument
+                        from add_guidelines import add_linkedin_hooks_guidelines
+                        
+                        added_ids = add_linkedin_hooks_guidelines(gary_bot.rag_system)
+                        st.success(f"✅ Added {len(added_ids)} guideline documents!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error adding guidelines: {str(e)}")
+        
+        with col2:
+            # File upload for custom guidelines
+            uploaded_guidelines = st.file_uploader(
+                "Upload Guidelines (Markdown)",
+                type=['md', 'txt'],
+                help="Upload a markdown file with your custom guidelines"
+            )
+        
+        if uploaded_guidelines is not None:
+            guidelines_content = str(uploaded_guidelines.read(), "utf-8")
+            
+            with st.expander("📄 Preview Uploaded Guidelines", expanded=False):
+                st.markdown(guidelines_content[:1000] + "..." if len(guidelines_content) > 1000 else guidelines_content)
+            
+            # Guidelines metadata
             col1, col2, col3 = st.columns(3)
             with col1:
-                filter_type = st.selectbox("Filter by Type", ["All", "Gold Standard", "Generated"], key="manage_filter")
+                doc_type = st.selectbox("Document Type", ["hooks", "templates", "style_guide", "general"])
             with col2:
-                sort_by = st.selectbox("Sort by", ["Creation Date", "Title", "Author", "Engagement"], key="manage_sort")
+                section = st.text_input("Section (Optional)", placeholder="e.g., curiosity, storytelling")
             with col3:
-                show_count = st.slider("Posts to show", 5, 50, 10, key="manage_count")
+                priority = st.selectbox("Priority", [1, 2, 3], index=1, help="1=Low, 2=Medium, 3=High")
             
-            # Filter posts
-            filtered_posts = all_posts
-            if filter_type == "Gold Standard":
-                filtered_posts = [p for p in all_posts if p.is_gold_standard]
-            elif filter_type == "Generated":
-                filtered_posts = [p for p in all_posts if not p.is_gold_standard]
-            
-            # Sort posts
-            if sort_by == "Title":
-                filtered_posts.sort(key=lambda p: getattr(p, 'title', None) or "Untitled", reverse=False)
-            elif sort_by == "Author":
-                filtered_posts.sort(key=lambda p: getattr(p, 'author', None) or "Unknown", reverse=False)
-            elif sort_by == "Engagement":
-                filtered_posts.sort(key=lambda p: p.likes + p.comments, reverse=True)
-            
-            # Bulk selection section
-            st.markdown("---")
-            st.subheader("🔽 Bulk Selection & Actions")
-            
-            # Initialize session state for bulk selection
-            if f"bulk_selected_posts_{filter_type}_{sort_by}" not in st.session_state:
-                st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = set()
-            
-            bulk_selected = st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"]
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                if st.button("☑️ Select All", key="select_all"):
-                    bulk_selected.update([post.id for post in filtered_posts[:show_count]])
-                    st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = bulk_selected
-                    st.rerun()
-            
-            with col2:
-                if st.button("⬜ Clear Selection", key="clear_selection"):
-                    st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = set()
-                    st.rerun()
-            
-            with col3:
-                selected_count = len(bulk_selected)
-                st.metric("Selected Posts", selected_count)
-            
-            with col4:
-                if selected_count > 0:
-                    if st.button(f"🗑️ Delete {selected_count} Posts", type="secondary", key="bulk_delete"):
-                        # Confirmation check
-                        if st.session_state.get("confirm_bulk_delete", False):
-                            # Perform bulk deletion using the new method
-                            with st.spinner(f"Deleting {selected_count} posts..."):
-                                result = gary_bot.bulk_delete_posts(list(bulk_selected))
+            if st.button("📝 Add Guidelines from File"):
+                with st.spinner("Processing guidelines..."):
+                    try:
+                        from src.models import GuidelineDocument
+                        import re
+                        
+                        # Simple parsing - split by lines and create guidelines
+                        lines = guidelines_content.split('\n')
+                        guidelines = []
+                        current_section = section or "general"
+                        
+                        for line in lines:
+                            line = line.strip()
+                            if line and len(line) > 20:  # Only substantial content
+                                # Check if it's a section header
+                                if line.startswith('#'):
+                                    current_section = line.lstrip('#').strip().lower().replace(' ', '_')
+                                    continue
                                 
-                                if result["success"]:
-                                    st.success(f"✅ Successfully deleted {result['deleted_count']} posts!")
-                                    if result["failed_count"] > 0:
-                                        st.warning(f"⚠️ Failed to delete {result['failed_count']} posts")
-                                else:
-                                    st.error(f"❌ Failed to delete posts: {result.get('error', 'Unknown error')}")
-                                
-                                # Clear selection and confirmation
-                                st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = set()
-                                st.session_state["confirm_bulk_delete"] = False
-                                st.rerun()
+                                guideline = GuidelineDocument(
+                                    id="",
+                                    title=f"{doc_type.title()} - {line[:50]}...",
+                                    content=line,
+                                    document_type=doc_type,
+                                    section=current_section,
+                                    priority=priority
+                                )
+                                guidelines.append(guideline)
+                        
+                        if guidelines:
+                            added_ids = gary_bot.rag_system.add_guidelines_batch(guidelines)
+                            st.success(f"✅ Added {len(added_ids)} guidelines from file!")
+                            st.rerun()
                         else:
-                            st.session_state["confirm_bulk_delete"] = True
-                            st.warning("⚠️ Click again to confirm bulk deletion")
+                            st.warning("❌ No substantial guidelines found in the file.")
+                    except Exception as e:
+                        st.error(f"❌ Error processing guidelines: {str(e)}")
+        
+        # Manual guideline addition
+        st.markdown("---")
+        st.subheader("➕ Add Individual Guideline")
+        
+        with st.form("add_guideline"):
+            col1, col2 = st.columns(2)
+            with col1:
+                guideline_title = st.text_input("Title", placeholder="e.g., Curiosity Hook Template")
+                guideline_type = st.selectbox("Type", ["hooks", "templates", "style_guide", "general"])
+            with col2:
+                guideline_section = st.text_input("Section", placeholder="e.g., curiosity, storytelling")
+                guideline_priority = st.selectbox("Priority", [1, 2, 3], index=1)
             
-            if selected_count > 0:
-                st.info(f"📌 {selected_count} posts selected for deletion. Use the 'Delete {selected_count} Posts' button above.")
+            guideline_content = st.text_area("Content", height=150, 
+                                           placeholder="Enter the guideline content, template, or rule...")
             
-            st.markdown("---")
+            if st.form_submit_button("✨ Add Guideline", type="primary"):
+                if guideline_title and guideline_content:
+                    try:
+                        from src.models import GuidelineDocument
+                        
+                        guideline = GuidelineDocument(
+                            id="",
+                            title=guideline_title,
+                            content=guideline_content,
+                            document_type=guideline_type,
+                            section=guideline_section or None,
+                            priority=guideline_priority
+                        )
+                        
+                        guideline_id = gary_bot.rag_system.add_guideline(guideline)
+                        st.success(f"✅ Added guideline: {guideline_title}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error adding guideline: {str(e)}")
+                else:
+                    st.error("❌ Please provide both title and content.")
+        
+        # List existing guidelines
+        st.markdown("---")
+        st.subheader("📚 Current Guidelines")
+        
+        try:
+            all_guidelines = gary_bot.rag_system.list_all_guidelines()
             
-            # Display posts with selection checkboxes
-            for i, post in enumerate(filtered_posts[:show_count]):
-                # Safely get title and author
-                post_title = getattr(post, 'title', None)
-                post_author = getattr(post, 'author', None)
+            if all_guidelines:
+                # Statistics
+                type_counts = {}
+                for guideline in all_guidelines:
+                    doc_type = guideline.document_type
+                    type_counts[doc_type] = type_counts.get(doc_type, 0) + 1
                 
-                # Selection checkbox in the expander title area
-                col_check, col_expand = st.columns([1, 10])
+                st.markdown(f"**Total Guidelines: {len(all_guidelines)}**")
+                cols = st.columns(len(type_counts))
+                for i, (doc_type, count) in enumerate(type_counts.items()):
+                    with cols[i]:
+                        st.metric(doc_type.title(), count)
                 
-                with col_check:
-                    is_selected = st.checkbox(
-                        "Select", 
-                        value=post.id in bulk_selected,
-                        key=f"select_post_{post.id}",
-                        label_visibility="collapsed"
-                    )
+                # Filter options
+                col1, col2 = st.columns(2)
+                with col1:
+                    filter_type = st.selectbox("Filter by Type", ["All"] + list(type_counts.keys()))
+                with col2:
+                    show_limit = st.selectbox("Show", [10, 25, 50, "All"], index=0)
+                
+                # Display guidelines
+                filtered_guidelines = all_guidelines
+                if filter_type != "All":
+                    filtered_guidelines = [g for g in all_guidelines if g.document_type == filter_type]
+                
+                if show_limit != "All":
+                    filtered_guidelines = filtered_guidelines[:int(show_limit)]
+                
+                # Bulk selection state
+                bulk_selection_key = f"bulk_selected_guidelines_{filter_type}_{show_limit}"
+                if bulk_selection_key not in st.session_state:
+                    st.session_state[bulk_selection_key] = set()
+                
+                bulk_selected = st.session_state[bulk_selection_key]
+                
+                # Bulk action buttons
+                st.markdown("### 🔧 Bulk Actions")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    if st.button("☑️ Select All Guidelines", key="select_all_guidelines"):
+                        bulk_selected.update([g.id for g in filtered_guidelines])
+                        st.session_state[bulk_selection_key] = bulk_selected
+                        st.rerun()
+                
+                with col2:
+                    if st.button("⬜ Clear Selection", key="clear_selection_guidelines"):
+                        st.session_state[bulk_selection_key] = set()
+                        st.rerun()
+                
+                with col3:
+                    selected_count = len(bulk_selected)
+                    st.metric("Selected Guidelines", selected_count)
+                
+                with col4:
+                    if selected_count > 0:
+                        if st.button(f"🗑️ Delete {selected_count} Guidelines", type="secondary", key="bulk_delete_guidelines"):
+                            # Confirmation check
+                            if st.session_state.get("confirm_bulk_delete_guidelines", False):
+                                # Perform bulk deletion
+                                with st.spinner(f"Deleting {selected_count} guidelines..."):
+                                    result = gary_bot.rag_system.bulk_delete_guidelines(list(bulk_selected))
+                                    
+                                    if result["success"]:
+                                        st.success(f"✅ Successfully deleted {result['deleted_count']} guidelines!")
+                                        if result["failed_count"] > 0:
+                                            st.warning(f"⚠️ Failed to delete {result['failed_count']} guidelines")
+                                    else:
+                                        st.error(f"❌ Failed to delete guidelines: {result.get('error', 'Unknown error')}")
+                                    
+                                    # Clear selection and confirmation
+                                    st.session_state[bulk_selection_key] = set()
+                                    st.session_state["confirm_bulk_delete_guidelines"] = False
+                                    st.rerun()
+                            else:
+                                st.session_state["confirm_bulk_delete_guidelines"] = True
+                                st.warning("⚠️ Click again to confirm bulk deletion")
+                
+                if selected_count > 0:
+                    st.info(f"📌 {selected_count} guidelines selected for deletion. Use the 'Delete {selected_count} Guidelines' button above.")
+                
+                st.markdown("---")
+                
+                # Display guidelines with selection checkboxes
+                for i, guideline in enumerate(filtered_guidelines):
+                    # Selection checkbox and expander
+                    col_check, col_expand = st.columns([1, 10])
                     
-                    # Update bulk selection
-                    if is_selected and post.id not in bulk_selected:
-                        bulk_selected.add(post.id)
-                        st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = bulk_selected
-                    elif not is_selected and post.id in bulk_selected:
-                        bulk_selected.discard(post.id)
-                        st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = bulk_selected
+                    with col_check:
+                        is_selected = st.checkbox(
+                            "Select", 
+                            value=guideline.id in bulk_selected,
+                            key=f"select_guideline_{guideline.id}",
+                            label_visibility="collapsed"
+                        )
+                        
+                        # Update bulk selection
+                        if is_selected and guideline.id not in bulk_selected:
+                            bulk_selected.add(guideline.id)
+                            st.session_state[bulk_selection_key] = bulk_selected
+                        elif not is_selected and guideline.id in bulk_selected:
+                            bulk_selected.discard(guideline.id)
+                            st.session_state[bulk_selection_key] = bulk_selected
+                    
+                    with col_expand:
+                        with st.expander(f"📋 {guideline.title} ({guideline.document_type})", expanded=False):
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                st.markdown(f"**Section:** {guideline.section or 'General'}")
+                                st.markdown(f"**Priority:** {guideline.priority}")
+                                st.markdown(f"**Content:**\n{guideline.content}")
+                            with col2:
+                                # Individual delete button
+                                if st.button("🗑️ Delete", key=f"del_guideline_{i}"):
+                                    if st.session_state.get(f"confirm_delete_guideline_{guideline.id}", False):
+                                        if gary_bot.rag_system.delete_guideline(guideline.id):
+                                            st.success("✅ Guideline deleted!")
+                                            # Remove from bulk selection if it was selected
+                                            bulk_selected.discard(guideline.id)
+                                            st.session_state[bulk_selection_key] = bulk_selected
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ Failed to delete guideline")
+                                    else:
+                                        st.session_state[f"confirm_delete_guideline_{guideline.id}"] = True
+                                        st.warning("⚠️ Click again to confirm deletion")
+            else:
+                st.info("📭 No guidelines found. Add some guidelines to help improve post generation!")
                 
-                with col_expand:
-                    with st.expander(
-                        f"{'🌟' if post.is_gold_standard else '📝'} {post_title or post.text[:50]+'...'} "
-                        f"{'by ' + post_author if post_author else ''}", 
-                        expanded=False
-                    ):
-                        col1, col2 = st.columns([3, 1])
-                        
-                        with col1:
-                            if post_title:
-                                st.markdown(f"**📋 Title:** {post_title}")
-                            if post_author:
-                                st.markdown(f"**👤 Author:** {post_author}")
-                            
-                            st.markdown("**📝 Content:**")
-                            st.markdown(f'<div class="post-preview">{post.text}</div>', unsafe_allow_html=True)
-                            
-                            if post.keywords:
-                                st.markdown(f"**🏷️ Keywords:** {', '.join(post.keywords)}")
-                            if post.content_type:
-                                st.markdown(f"**📂 Type:** {post.content_type}")
-                            
-                            st.markdown(f"**📅 Created:** {post.created_at.strftime('%Y-%m-%d %H:%M')}")
-                        
-                        with col2:
-                            st.markdown("**📊 Metrics**")
-                            st.metric("👍 Likes", post.likes)
-                            st.metric("💬 Comments", post.comments)
-                            st.metric("🔥 Total", post.likes + post.comments)
-                            
-                            if post.is_gold_standard:
-                                st.success("🌟 Gold Standard")
-                            
-                            # Action buttons
-                            st.markdown("**⚡ Actions**")
-                            
-                            # Update engagement - use checkbox instead of expander
-                            show_engagement_form = st.checkbox("📈 Update Engagement", key=f"show_engagement_{post.id}")
-                            if show_engagement_form:
-                                new_likes = st.number_input("Likes", value=post.likes, min_value=0, key=f"edit_likes_{post.id}")
-                                new_comments = st.number_input("Comments", value=post.comments, min_value=0, key=f"edit_comments_{post.id}")
-                                
-                                if st.button("💾 Update", key=f"update_{post.id}"):
-                                    success = gary_bot.update_post_engagement(post.id, new_likes, new_comments)
-                                    if success:
-                                        st.success("✅ Updated!")
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Failed to update")
-                            
-                            # Individual delete button
-                            if st.button("🗑️ Delete Post", key=f"delete_{post.id}", type="secondary"):
-                                if st.session_state.get(f"confirm_delete_{post.id}", False):
-                                    success = gary_bot.delete_post(post.id)
-                                    if success:
-                                        st.success("✅ Post deleted!")
-                                        # Remove from bulk selection if it was selected
-                                        bulk_selected.discard(post.id)
-                                        st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = bulk_selected
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Failed to delete")
-                                else:
-                                    st.session_state[f"confirm_delete_{post.id}"] = True
-                                    st.warning("⚠️ Click again to confirm deletion")
-        else:
-            st.info("📝 No posts found. Add some posts to see them here!")
+        except Exception as e:
+            st.error(f"❌ Error loading guidelines: {str(e)}")
     
-    except Exception as e:
-        st.error(f"❌ Error loading posts: {str(e)}")
+    with tab1:
+        # Add new gold standard post
+        st.subheader("➕ Add Gold Standard Post")
+        st.markdown("🤖 **Smart Features:** Keywords and content type will be automatically extracted if not provided!")
+        
+        with st.form("add_gold_standard"):
+            # Title and Author
+            col1, col2 = st.columns(2)
+            with col1:
+                title = st.text_input("Title (Optional)", placeholder="Give your post a memorable title...")
+            with col2:
+                # Author dropdown with Gary Lin as default
+                author_option = st.selectbox(
+                    "Author",
+                    ["Gary Lin", "Other"],
+                    index=0,
+                    help="Select author - only Gary Lin's posts will be included in stats"
+                )
+                
+                if author_option == "Other":
+                    author = st.text_input("Enter author name:", placeholder="e.g., John Doe...")
+                else:
+                    author = "Gary Lin"
+            
+            # Post content
+            post_text = st.text_area("Post Content", height=200, placeholder="Enter a high-performing LinkedIn post...")
+            
+            # Engagement metrics
+            col1, col2 = st.columns(2)
+            with col1:
+                likes = st.number_input("Likes", min_value=0, value=0, key="add_likes")
+            with col2:
+                comments = st.number_input("Comments", min_value=0, value=0, key="add_comments")
+            
+            # Advanced options in an expander
+            with st.expander("🔧 Advanced Options (Optional)", expanded=False):
+                col1, col2 = st.columns(2)
+                with col1:
+                    manual_keywords = st.text_input("Manual Keywords (comma-separated)", 
+                                                   placeholder="Leave empty for auto-extraction")
+                with col2:
+                    manual_content_type = st.selectbox("Manual Content Type", 
+                                                      ["Auto-detect"] + CONTENT_TYPES)
+            
+            submitted = st.form_submit_button("✨ Add to RAG System (Auto-Enhanced)", type="primary")
+            
+            if submitted and post_text:
+                try:
+                    with st.spinner("🤖 Analyzing post and extracting metadata..."):
+                        # Prepare parameters
+                        keywords_list = None
+                        content_type = None
+                        
+                        # Use manual inputs if provided
+                        if 'manual_keywords' in locals() and manual_keywords:
+                            keywords_list = [k.strip() for k in manual_keywords.split(",") if k.strip()]
+                        
+                        if 'manual_content_type' in locals() and manual_content_type != "Auto-detect":
+                            content_type = manual_content_type
+                        
+                        # Add the post (will auto-extract if keywords/content_type are None)
+                        post_id = gary_bot.add_gold_standard_post(
+                            post_text, 
+                            keywords=keywords_list, 
+                            likes=likes, 
+                            comments=comments,
+                            content_type=content_type,
+                            title=title if title else None,
+                            author=author if author else None
+                        )
+                        
+                        st.success(f"✅ Successfully added gold standard post!")
+                        st.info("🤖 Check the console output above for extracted keywords and content type.")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error adding post: {str(e)}")
+        
+        st.markdown("---")
+        
+        # Post Management Section
+        st.subheader("📚 Post Management")
+        
+        try:
+            all_posts = gary_bot.get_post_history()
+            
+            if all_posts:
+                # Filter options
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    filter_type = st.selectbox("Filter by Type", ["All", "Gold Standard", "Generated"], key="manage_filter")
+                with col2:
+                    sort_by = st.selectbox("Sort by", ["Creation Date", "Title", "Author", "Engagement"], key="manage_sort")
+                with col3:
+                    show_count = st.slider("Posts to show", 5, 50, 10, key="manage_count")
+                
+                # Filter posts
+                filtered_posts = all_posts
+                if filter_type == "Gold Standard":
+                    filtered_posts = [p for p in all_posts if p.is_gold_standard]
+                elif filter_type == "Generated":
+                    filtered_posts = [p for p in all_posts if not p.is_gold_standard]
+                
+                # Sort posts
+                if sort_by == "Title":
+                    filtered_posts.sort(key=lambda p: getattr(p, 'title', None) or "Untitled", reverse=False)
+                elif sort_by == "Author":
+                    filtered_posts.sort(key=lambda p: getattr(p, 'author', None) or "Unknown", reverse=False)
+                elif sort_by == "Engagement":
+                    filtered_posts.sort(key=lambda p: p.likes + p.comments, reverse=True)
+                
+                # Bulk selection section
+                st.markdown("---")
+                st.subheader("🔽 Bulk Selection & Actions")
+                
+                # Initialize session state for bulk selection
+                if f"bulk_selected_posts_{filter_type}_{sort_by}" not in st.session_state:
+                    st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = set()
+                
+                bulk_selected = st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"]
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    if st.button("☑️ Select All", key="select_all"):
+                        bulk_selected.update([post.id for post in filtered_posts[:show_count]])
+                        st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = bulk_selected
+                        st.rerun()
+                
+                with col2:
+                    if st.button("⬜ Clear Selection", key="clear_selection"):
+                        st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = set()
+                        st.rerun()
+                
+                with col3:
+                    selected_count = len(bulk_selected)
+                    st.metric("Selected Posts", selected_count)
+                
+                with col4:
+                    if selected_count > 0:
+                        if st.button(f"🗑️ Delete {selected_count} Posts", type="secondary", key="bulk_delete"):
+                            # Confirmation check
+                            if st.session_state.get("confirm_bulk_delete", False):
+                                # Perform bulk deletion using the new method
+                                with st.spinner(f"Deleting {selected_count} posts..."):
+                                    result = gary_bot.bulk_delete_posts(list(bulk_selected))
+                                    
+                                    if result["success"]:
+                                        st.success(f"✅ Successfully deleted {result['deleted_count']} posts!")
+                                        if result["failed_count"] > 0:
+                                            st.warning(f"⚠️ Failed to delete {result['failed_count']} posts")
+                                    else:
+                                        st.error(f"❌ Failed to delete posts: {result.get('error', 'Unknown error')}")
+                                    
+                                    # Clear selection and confirmation
+                                    st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = set()
+                                    st.session_state["confirm_bulk_delete"] = False
+                                    st.rerun()
+                            else:
+                                st.session_state["confirm_bulk_delete"] = True
+                                st.warning("⚠️ Click again to confirm bulk deletion")
+                
+                if selected_count > 0:
+                    st.info(f"📌 {selected_count} posts selected for deletion. Use the 'Delete {selected_count} Posts' button above.")
+                
+                st.markdown("---")
+                
+                # Display posts with selection checkboxes
+                for i, post in enumerate(filtered_posts[:show_count]):
+                    # Safely get title and author
+                    post_title = getattr(post, 'title', None)
+                    post_author = getattr(post, 'author', None)
+                    
+                    # Selection checkbox in the expander title area
+                    col_check, col_expand = st.columns([1, 10])
+                    
+                    with col_check:
+                        is_selected = st.checkbox(
+                            "Select", 
+                            value=post.id in bulk_selected,
+                            key=f"select_post_{post.id}",
+                            label_visibility="collapsed"
+                        )
+                        
+                        # Update bulk selection
+                        if is_selected and post.id not in bulk_selected:
+                            bulk_selected.add(post.id)
+                            st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = bulk_selected
+                        elif not is_selected and post.id in bulk_selected:
+                            bulk_selected.discard(post.id)
+                            st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = bulk_selected
+                    
+                    with col_expand:
+                        with st.expander(
+                            f"{'🌟' if post.is_gold_standard else '📝'} {post_title or post.text[:50]+'...'} "
+                            f"{'by ' + post_author if post_author else ''}", 
+                            expanded=False
+                        ):
+                            col1, col2 = st.columns([3, 1])
+                            
+                            with col1:
+                                if post_title:
+                                    st.markdown(f"**📋 Title:** {post_title}")
+                                if post_author:
+                                    st.markdown(f"**👤 Author:** {post_author}")
+                                
+                                st.markdown("**📝 Content:**")
+                                st.markdown(f'<div class="post-preview">{post.text}</div>', unsafe_allow_html=True)
+                                
+                                if post.keywords:
+                                    st.markdown(f"**🏷️ Keywords:** {', '.join(post.keywords)}")
+                                if post.content_type:
+                                    st.markdown(f"**📂 Type:** {post.content_type}")
+                                
+                                st.markdown(f"**📅 Created:** {post.created_at.strftime('%Y-%m-%d %H:%M')}")
+                            
+                            with col2:
+                                st.markdown("**📊 Metrics**")
+                                st.metric("👍 Likes", post.likes)
+                                st.metric("💬 Comments", post.comments)
+                                st.metric("🔥 Total", post.likes + post.comments)
+                                
+                                if post.is_gold_standard:
+                                    st.success("🌟 Gold Standard")
+                                
+                                # Action buttons
+                                st.markdown("**⚡ Actions**")
+                                
+                                # Update engagement - use checkbox instead of expander
+                                show_engagement_form = st.checkbox("📈 Update Engagement", key=f"show_engagement_{post.id}")
+                                if show_engagement_form:
+                                    new_likes = st.number_input("Likes", value=post.likes, min_value=0, key=f"edit_likes_{post.id}")
+                                    new_comments = st.number_input("Comments", value=post.comments, min_value=0, key=f"edit_comments_{post.id}")
+                                    
+                                    if st.button("💾 Update", key=f"update_{post.id}"):
+                                        success = gary_bot.update_post_engagement(post.id, new_likes, new_comments)
+                                        if success:
+                                            st.success("✅ Updated!")
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ Failed to update")
+                                
+                                # Individual delete button
+                                if st.button("🗑️ Delete Post", key=f"delete_{post.id}", type="secondary"):
+                                    if st.session_state.get(f"confirm_delete_{post.id}", False):
+                                        success = gary_bot.delete_post(post.id)
+                                        if success:
+                                            st.success("✅ Post deleted!")
+                                            # Remove from bulk selection if it was selected
+                                            bulk_selected.discard(post.id)
+                                            st.session_state[f"bulk_selected_posts_{filter_type}_{sort_by}"] = bulk_selected
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ Failed to delete")
+                                    else:
+                                        st.session_state[f"confirm_delete_{post.id}"] = True
+                                        st.warning("⚠️ Click again to confirm deletion")
+            else:
+                st.info("📝 No posts found. Add some posts to see them here!")
+        
+        except Exception as e:
+            st.error(f"❌ Error loading posts: {str(e)}")
+        
+        st.markdown("---")
+        
+        # RAG Statistics
+        st.subheader("📊 RAG Statistics")
+        
+        try:
+            stats = gary_bot.get_system_stats()
+            rag_stats = stats.get("rag_stats", {})
+            gary_stats = stats.get("gary_stats", {})
+            
+            # Gary Lin's Stats
+            st.markdown("### 🎯 Gary Lin's Performance")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Gary's Posts", gary_stats.get("total_posts", 0))
+            with col2:
+                st.metric("Gold Standard", gary_stats.get("gold_standard_posts", 0))
+            with col3:
+                st.metric("Generated Posts", gary_stats.get("generated_posts", 0))
+            with col4:
+                st.metric("Avg Likes", f"{gary_stats.get('avg_likes_per_post', 0):.1f}")
+            
+            # Overall RAG Stats
+            st.markdown("### 📊 Overall System")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Posts", rag_stats.get("total_posts", 0))
+            with col2:
+                st.metric("Total Authors", rag_stats.get("unique_authors", 0))
+            with col3:
+                st.metric("Total Engagement", rag_stats.get("total_engagement", 0))
+            with col4:
+                st.metric("Avg Engagement", f"{rag_stats.get('avg_engagement_per_post', 0):.1f}")
+        
+        except Exception as e:
+            st.error(f"❌ Error loading stats: {str(e)}")
     
     st.markdown("---")
-    
-    # RAG Statistics
-    st.subheader("📊 RAG Statistics")
-    
-    try:
-        stats = gary_bot.get_system_stats()
-        rag_stats = stats.get("rag_stats", {})
-        gary_stats = stats.get("gary_stats", {})
-        
-        # Gary Lin's Stats
-        st.markdown("### 🎯 Gary Lin's Performance")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Gary's Posts", gary_stats.get("total_posts", 0))
-        with col2:
-            st.metric("Gold Standard", gary_stats.get("gold_standard_posts", 0))
-        with col3:
-            st.metric("Generated Posts", gary_stats.get("generated_posts", 0))
-        with col4:
-            st.metric("Total Engagement", gary_stats.get("total_engagement", 0))
-        
-        # Overall System Stats
-        st.markdown("### 📈 Overall System Stats")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("All Posts", rag_stats.get("total_posts", 0))
-        with col2:
-            st.metric("All Gold Standard", rag_stats.get("gold_standard_posts", 0))
-        with col3:
-            st.metric("All Generated", rag_stats.get("generated_posts", 0))
-        with col4:
-            st.metric("All Engagement", rag_stats.get("total_likes", 0) + rag_stats.get("total_comments", 0))
-        
-        # Show breakdown by author if there are non-Gary posts
-        all_posts = gary_bot.get_post_history()
-        authors = set(getattr(post, 'author', 'Unknown') for post in all_posts)
-        if len(authors) > 1:
-            st.markdown("### 👥 Posts by Author")
-            author_breakdown = {}
-            for author in authors:
-                author_posts = [post for post in all_posts if getattr(post, 'author', 'Unknown') == author]
-                author_breakdown[author] = {
-                    "count": len(author_posts),
-                    "engagement": sum(post.likes + post.comments for post in author_posts)
-                }
-            
-            for author, data in author_breakdown.items():
-                st.metric(f"{author}", f"{data['count']} posts", f"{data['engagement']} engagement")
-        
-    except Exception as e:
-        st.error(f"❌ Error loading RAG stats: {str(e)}")
 
 def system_stats_page(gary_bot: GaryBot):
     """System statistics and analytics page."""
@@ -1038,13 +1494,30 @@ def system_stats_page(gary_bot: GaryBot):
         # Configuration
         st.subheader("⚙️ Current Configuration")
         config = stats.get("config", {})
+        effective_config = get_effective_config()
         
         col1, col2 = st.columns(2)
         with col1:
-            st.info(f"**LLM Model:** {config.get('llm_model', 'Unknown')}")
+            # Show provider and model info
+            if effective_config.llm_provider == "groq":
+                st.info(f"**LLM Provider:** 🚀 Groq")
+                st.info(f"**Groq Model:** {effective_config.llm_model}")
+            elif effective_config.llm_provider == "openai":
+                st.info(f"**LLM Provider:** 🧠 OpenAI")
+                st.info(f"**OpenAI Model:** {effective_config.openai_model}")
+            else:
+                st.info(f"**LLM Provider:** {effective_config.llm_provider}")
+            
             st.info(f"**Embedding Model:** {config.get('embedding_model', 'Unknown')}")
         with col2:
             st.info(f"**RAG Retrieval Count:** {config.get('rag_retrieval_count', 'Unknown')}")
+            st.info(f"**Temperature:** {effective_config.default_temperature}")
+            st.info(f"**Min Similarity:** {effective_config.min_similarity_threshold}")
+            
+            # Show configuration source
+            ui_configured = any(hasattr(st.session_state, key) for key in ['ui_llm_provider', 'ui_groq_api_key', 'ui_openai_api_key'])
+            config_source = "🎮 UI Configuration" if ui_configured else "📄 Environment Variables"
+            st.info(f"**Config Source:** {config_source}")
         
         # Performance metrics (if we had them)
         st.subheader("📈 Performance Trends")
@@ -1057,61 +1530,296 @@ def settings_page(gary_bot: GaryBot):
     """Settings and configuration page."""
     
     st.header("🔧 Settings")
-    st.markdown("Configure Gary Bot settings and preferences.")
-    
-    # Model settings
-    st.subheader("🤖 Model Configuration")
+    st.markdown("Configure Gary Bot settings and preferences directly in the UI - no .env file changes needed!")
     
     current_config = gary_bot.config
+    
+    # UI Configuration Section
+    st.subheader("🎮 Live Configuration (No Restart Needed)")
+    st.markdown("Configure your LLM provider and API keys directly here. Changes take effect immediately!")
+    
+    # Initialize session state if not exists
+    if 'ui_llm_provider' not in st.session_state:
+        st.session_state.ui_llm_provider = current_config.llm_provider
+    if 'ui_groq_api_key' not in st.session_state:
+        st.session_state.ui_groq_api_key = ""
+    if 'ui_openai_api_key' not in st.session_state:
+        st.session_state.ui_openai_api_key = ""
+    if 'ui_groq_model' not in st.session_state:
+        st.session_state.ui_groq_model = current_config.llm_model
+    if 'ui_openai_model' not in st.session_state:
+        st.session_state.ui_openai_model = current_config.openai_model
+    
+    # Provider Selection
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        provider_changed = False
+        new_provider = st.selectbox(
+            "🤖 Choose LLM Provider:",
+            ["groq", "openai"],
+            index=0 if st.session_state.ui_llm_provider == "groq" else 1,
+            help="Groq is free, OpenAI requires credits"
+        )
+        
+        if new_provider != st.session_state.ui_llm_provider:
+            st.session_state.ui_llm_provider = new_provider
+            provider_changed = True
+    
+    with col2:
+        if st.session_state.ui_llm_provider == "groq":
+            st.info("🚀 **Groq**: Free, fast inference with open-source models")
+        else:
+            st.info("🧠 **OpenAI**: Premium ChatGPT models (requires API credits)")
+    
+    # API Key Configuration
+    st.markdown("### 🔑 API Key Configuration")
+    
+    if st.session_state.ui_llm_provider == "groq":
+        # Groq Configuration
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            new_groq_key = st.text_input(
+                "🚀 Groq API Key:",
+                value=st.session_state.ui_groq_api_key,
+                type="password",
+                placeholder="gsk_your_groq_api_key_here",
+                help="Get your free API key from console.groq.com"
+            )
+            
+            if new_groq_key != st.session_state.ui_groq_api_key:
+                st.session_state.ui_groq_api_key = new_groq_key
+                provider_changed = True
+        
+        with col2:
+            if st.button("🔗 Get Groq API Key", type="secondary"):
+                st.markdown("**Get your free Groq API key:**")
+                st.markdown("1. Visit [console.groq.com](https://console.groq.com)")
+                st.markdown("2. Sign up for free")
+                st.markdown("3. Go to API Keys section")
+                st.markdown("4. Create a new API key")
+                st.markdown("5. Paste it above")
+        
+        # Groq Model Selection
+        groq_model = st.selectbox(
+            "⚡ Groq Model:",
+            list(AVAILABLE_GROQ_MODELS.keys()),
+            index=list(AVAILABLE_GROQ_MODELS.keys()).index(st.session_state.ui_groq_model),
+            format_func=lambda x: f"{x} - {AVAILABLE_GROQ_MODELS[x]}"
+        )
+        
+        if groq_model != st.session_state.ui_groq_model:
+            st.session_state.ui_groq_model = groq_model
+            provider_changed = True
+    
+    else:  # OpenAI
+        # OpenAI Configuration
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            new_openai_key = st.text_input(
+                "🧠 OpenAI API Key:",
+                value=st.session_state.ui_openai_api_key,
+                type="password",
+                placeholder="sk-your_openai_api_key_here",
+                help="Get your API key from platform.openai.com"
+            )
+            
+            if new_openai_key != st.session_state.ui_openai_api_key:
+                st.session_state.ui_openai_api_key = new_openai_key
+                provider_changed = True
+        
+        with col2:
+            if st.button("🔗 Get OpenAI API Key", type="secondary"):
+                st.markdown("**Get your OpenAI API key:**")
+                st.markdown("1. Visit [platform.openai.com](https://platform.openai.com)")
+                st.markdown("2. Sign up or log in")
+                st.markdown("3. Go to API Keys section")
+                st.markdown("4. Create a new API key")
+                st.markdown("5. Paste it above")
+        
+        # OpenAI Model Selection
+        openai_model = st.selectbox(
+            "🧠 OpenAI Model:",
+            list(AVAILABLE_OPENAI_MODELS.keys()),
+            index=list(AVAILABLE_OPENAI_MODELS.keys()).index(st.session_state.ui_openai_model),
+            format_func=lambda x: f"{x} - {AVAILABLE_OPENAI_MODELS[x]}"
+        )
+        
+        if openai_model != st.session_state.ui_openai_model:
+            st.session_state.ui_openai_model = openai_model
+            provider_changed = True
+        
+        st.warning("⚠️ **Note**: OpenAI is a paid service. Make sure you have credits in your account.")
+    
+    # Clear cache if configuration changed
+    if provider_changed:
+        clear_gary_bot_cache()
+        st.rerun()
+    
+    # Current Status
+    st.markdown("### 📊 Current Status")
+    
+    effective_config = get_effective_config()
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        provider_status = "✅" if validate_effective_config(effective_config) else "❌"
+        st.metric("Provider", f"{provider_status} {effective_config.llm_provider.upper()}")
+    
+    with col2:
+        if effective_config.llm_provider == "groq":
+            api_status = "✅" if effective_config.groq_api_key else "❌"
+            st.metric("Groq API Key", f"{api_status} {'Set' if effective_config.groq_api_key else 'Missing'}")
+        else:
+            api_status = "✅" if effective_config.openai_api_key else "❌"
+            st.metric("OpenAI API Key", f"{api_status} {'Set' if effective_config.openai_api_key else 'Missing'}")
+    
+    with col3:
+        model_name = effective_config.llm_model if effective_config.llm_provider == "groq" else effective_config.openai_model
+        st.metric("Model", model_name)
+    
+    # Test Configuration
+    if validate_effective_config(effective_config):
+        if st.button("🧪 Test Current Configuration", type="primary"):
+            try:
+                with st.spinner("Testing configuration..."):
+                    # Test basic functionality
+                    test_result = gary_bot.content_generator.generate_post(
+                        "This is a test to verify the LLM connection is working.",
+                        temperature=0.3,
+                        max_tokens=100
+                    )
+                    
+                    st.success(f"✅ Configuration test successful!")
+                    st.info(f"**Provider**: {effective_config.llm_provider.upper()}")
+                    if effective_config.llm_provider == "groq":
+                        st.info(f"**Model**: {effective_config.llm_model}")
+                    else:
+                        st.info(f"**Model**: {effective_config.openai_model}")
+                    
+                    with st.expander("📄 Test Response Preview"):
+                        st.markdown(test_result[:200] + "..." if len(test_result) > 200 else test_result)
+                    
+            except Exception as e:
+                st.error(f"❌ Configuration test failed: {str(e)}")
+                st.markdown("**Possible solutions:**")
+                st.markdown("• Check your API key is correct")
+                st.markdown("• Verify your internet connection")
+                st.markdown("• Make sure you have credits (for OpenAI)")
+    else:
+        st.error("❌ Configuration incomplete. Please add your API key above.")
+    
+    st.markdown("---")
+    
+    # Alternative: Environment Configuration
+    st.subheader("📄 Alternative: Environment File Configuration")
+    st.markdown("If you prefer to use environment variables instead of the UI configuration above:")
+    
+    with st.expander("📝 View .env File Template", expanded=False):
+        st.markdown("""
+        ```bash
+        # Choose your provider
+        LLM_PROVIDER=openai                 # or "groq"
+        
+        # API Keys (add the one you're using)
+        GROQ_API_KEY=gsk_your_groq_key_here
+        OPENAI_API_KEY=sk-your_openai_key_here
+        
+        # Model Selection (Groq Options)
+        LLM_MODEL=llama3-70b-8192          # For Groq - Traditional
+        # LLM_MODEL=deepseek-r1-distill-llama-70b  # For Groq - Latest reasoning model
+        OPENAI_MODEL=gpt-4o                # For OpenAI - Latest flagship
+        
+        # Other Settings
+        EMBEDDING_MODEL=all-MiniLM-L6-v2
+        RAG_RETRIEVAL_COUNT=3
+        DEFAULT_TEMPERATURE=0.7
+        ```
+        """)
+        
+        st.info("💡 **Tip**: UI configuration above takes precedence over .env file settings.")
+    
+    # Other Settings Display
+    st.subheader("⚙️ Other Settings")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("**Current LLM Model:**")
-        st.info(current_config.llm_model)
-        
-        st.markdown("**Available Models:**")
-        for model, description in AVAILABLE_GROQ_MODELS.items():
-            st.markdown(f"• **{model}**: {description}")
+        st.markdown("**Current Configuration:**")
+        st.markdown(f"• Embedding Model: `{effective_config.embedding_model_name}`")
+        st.markdown(f"• RAG Retrieval Count: `{effective_config.rag_retrieval_count}`")
+        st.markdown(f"• Temperature: `{effective_config.default_temperature}`")
+        st.markdown(f"• Min Similarity: `{effective_config.min_similarity_threshold}`")
     
     with col2:
-        st.markdown("**Current Embedding Model:**")
-        st.info(current_config.embedding_model_name)
-        
-        st.markdown("**Current Settings:**")
-        st.markdown(f"• RAG Retrieval Count: {current_config.rag_retrieval_count}")
-        st.markdown(f"• Temperature: {current_config.default_temperature}")
-        st.markdown(f"• Min Similarity: {current_config.min_similarity_threshold}")
+        st.markdown("**System Information:**")
+        st.markdown(f"• Database Path: `{effective_config.db_path}`")
+        st.markdown(f"• Collection Name: `{effective_config.collection_name}`")
+        st.markdown(f"• Max Tokens: `{effective_config.max_tokens}`")
+        st.markdown(f"• Post Variations: `{effective_config.num_post_variations}`")
     
     st.markdown("---")
     
-    # Environment setup instructions
-    st.subheader("🔧 Setup Instructions")
+    # Environment File Example
+    st.subheader("📄 Complete .env File Example")
     
     st.markdown("""
-    To configure Gary Bot, create a `.env` file in the project root with the following variables:
+    Here's a complete example of what your `.env` file should look like:
     
     ```bash
-    GROQ_API_KEY=your_groq_api_key_here
-    LLM_MODEL=llama3-70b-8192
+    # LLM Provider (choose one)
+    LLM_PROVIDER=groq                    # or "openai"
+    
+    # API Keys (add the one you're using)
+    GROQ_API_KEY=gsk_your_groq_key_here
+    OPENAI_API_KEY=sk-your_openai_key_here
+    
+    # Model Selection
+    LLM_MODEL=llama3-70b-8192           # For Groq - Traditional
+    # LLM_MODEL=deepseek-r1-distill-llama-70b  # For Groq - Latest reasoning model
+    OPENAI_MODEL=gpt-4o                 # For OpenAI - Latest flagship
+    
+    # Other Settings
     EMBEDDING_MODEL=all-MiniLM-L6-v2
     RAG_RETRIEVAL_COUNT=3
     DEFAULT_TEMPERATURE=0.7
-    MIN_SIMILARITY_THRESHOLD=0.3
     ```
-    
-    **Getting a Groq API Key:**
-    1. Visit [console.groq.com](https://console.groq.com)
-    2. Sign up or log in
-    3. Go to API Keys section
-    4. Create a new API key
-    5. Copy it to your `.env` file
     """)
     
-    # System info
-    st.subheader("ℹ️ System Information")
-    st.markdown(f"**Database Path:** `{current_config.db_path}`")
-    st.markdown(f"**Collection Name:** `{current_config.collection_name}`")
+    st.info("💡 **Tip**: After updating your `.env` file, restart the application for changes to take effect.")
+    
+    # Quick Test Section
+    st.subheader("🧪 Quick Test")
+    if st.button("🔍 Test Current Configuration", type="primary"):
+        try:
+            with st.spinner("Testing configuration..."):
+                # Test basic functionality
+                test_result = gary_bot.content_generator.generate_post(
+                    "This is a test to verify the LLM connection is working.",
+                    temperature=0.3,
+                    max_tokens=100
+                )
+                
+                st.success(f"✅ Configuration test successful!")
+                st.info(f"**Provider**: {effective_config.llm_provider.upper()}")
+                if effective_config.llm_provider == "groq":
+                    st.info(f"**Model**: {effective_config.llm_model}")
+                else:
+                    st.info(f"**Model**: {effective_config.openai_model}")
+                
+                with st.expander("📄 Test Response Preview"):
+                    st.markdown(test_result[:200] + "..." if len(test_result) > 200 else test_result)
+                    
+        except Exception as e:
+            st.error(f"❌ Configuration test failed: {str(e)}")
+            st.markdown("**Possible solutions:**")
+            st.markdown("• Check your API key is correct")
+            st.markdown("• Verify your internet connection")
+            st.markdown("• Make sure you have credits (for OpenAI)")
+            st.markdown("• Restart the application after changing .env")
 
 if __name__ == "__main__":
     main() 
