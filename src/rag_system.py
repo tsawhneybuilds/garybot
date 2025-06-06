@@ -468,7 +468,7 @@ class RAGSystem:
         # Prepare metadata
         metadata = {
             "title": guideline.title,
-            "document_type": guideline.document_type,
+            "hook_type": guideline.hook_type,
             "section": guideline.section or "",
             "created_at": guideline.created_at.isoformat(),
             "priority": guideline.priority
@@ -514,7 +514,7 @@ class RAGSystem:
             # Prepare metadata
             metadata = {
                 "title": guideline.title,
-                "document_type": guideline.document_type,
+                "hook_type": guideline.hook_type,
                 "section": guideline.section or "",
                 "created_at": guideline.created_at.isoformat(),
                 "priority": guideline.priority
@@ -532,7 +532,7 @@ class RAGSystem:
         return ids
     
     def retrieve_relevant_guidelines(self, query_text: str, top_k: int = 3,
-                                   document_type: Optional[str] = None,
+                                   hook_type: Optional[str] = None,
                                    section: Optional[str] = None) -> List[GuidelineDocument]:
         """
         Retrieve guideline documents relevant to the query text.
@@ -540,7 +540,7 @@ class RAGSystem:
         Args:
             query_text: Text to find relevant guidelines for
             top_k: Number of guidelines to return
-            document_type: Filter by document type (e.g., "hooks", "templates")
+            hook_type: Filter by hook type (e.g., "hooks", "templates")
             section: Filter by section (e.g., "curiosity", "storytelling")
             
         Returns:
@@ -551,8 +551,8 @@ class RAGSystem:
         
         # Build where clause for filtering
         where_clause = {}
-        if document_type:
-            where_clause["document_type"] = document_type
+        if hook_type:
+            where_clause["hook_type"] = hook_type
         if section:
             where_clause["section"] = section
         
@@ -574,7 +574,7 @@ class RAGSystem:
                 id=results['ids'][0][i],
                 title=metadata['title'],
                 content=results['documents'][0][i],
-                document_type=metadata['document_type'],
+                hook_type=metadata['hook_type'],
                 section=metadata.get('section') or None,
                 embedding=results['embeddings'][0][i] if results['embeddings'] else [],
                 created_at=created_at,
@@ -611,7 +611,7 @@ class RAGSystem:
                 id=results['ids'][i],
                 title=metadata['title'],
                 content=results['documents'][i],
-                document_type=metadata['document_type'],
+                hook_type=metadata['hook_type'],
                 section=metadata.get('section') or None,
                 embedding=results['embeddings'][i] if results['embeddings'] else [],
                 created_at=created_at,
@@ -701,7 +701,7 @@ class RAGSystem:
         for i, guideline in enumerate(guidelines, 1):
             context_parts.append(
                 f"--- Guideline {i}: {guideline.title} ---\n"
-                f"Type: {guideline.document_type}\n"
+                f"Type: {guideline.hook_type}\n"
                 f"Section: {guideline.section or 'General'}\n"
                 f"Content: {guideline.content}\n"
             )

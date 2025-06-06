@@ -1125,6 +1125,41 @@ You need to rewrite and improve an existing LinkedIn post to match the style and
         
         return self.add_persona(gary_persona)
     
+    def create_persona(self, name: str, description: str, voice_tone: str, target_audience: str,
+                      content_types: Optional[List[str]] = None, style_guide: Optional[str] = None,
+                      example_hooks: Optional[List[str]] = None, is_default: bool = False,
+                      is_active: bool = True) -> str:
+        """
+        Create a new persona with the given parameters.
+        
+        Args:
+            name: Name of the persona
+            description: Description of the persona
+            voice_tone: Voice and tone characteristics
+            target_audience: Target audience for this persona
+            content_types: List of content types this persona specializes in
+            style_guide: Style guide for this persona
+            example_hooks: Example hooks this persona might use
+            is_default: Whether this should be the default persona
+            is_active: Whether this persona is active
+            
+        Returns:
+            ID of the created persona
+        """
+        persona = Persona(
+            name=name,
+            description=description,
+            voice_tone=voice_tone,
+            content_types=content_types or [],
+            style_guide=style_guide or "",
+            example_hooks=example_hooks or [],
+            target_audience=target_audience,
+            is_default=is_default,
+            is_active=is_active
+        )
+        
+        return self.add_persona(persona)
+    
     def update_post_personas(self, post_id: str, persona_ids: List[str]) -> bool:
         """
         Update which personas a post applies to.

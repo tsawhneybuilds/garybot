@@ -7,10 +7,7 @@ import traceback
 
 # Import our modules
 from src.gary_bot import GaryBot
-from src.config import (get_config, validate_config, print_config_summary, 
-                       AVAILABLE_GROQ_MODELS, AVAILABLE_OPENAI_MODELS, LLM_PROVIDERS, CONTENT_TYPES,
-                       load_content_types, save_content_types, add_content_type, 
-                       remove_content_type, update_content_type, reload_content_types)
+from src.config import get_config, validate_config, print_config_summary, AVAILABLE_GROQ_MODELS, AVAILABLE_OPENAI_MODELS, LLM_PROVIDERS, CONTENT_TYPES
 from src.models import GeneratedPostDraft, ViralSnippetCandidate
 from src.backup_system import BackupSystem
 
@@ -183,212 +180,294 @@ def main():
         settings_page(gary_bot)
 
 def generate_posts_page(gary_bot: GaryBot):
-    """Main post generation page."""
+    """Main post generation page - focused on writing from ideas."""
     
-    st.header("📝 Generate LinkedIn Posts")
-    st.markdown("Upload a transcript and let Gary Bot identify the most viral snippets and generate engaging LinkedIn posts.")
+    st.header("✍️ Write LinkedIn Posts")
+    st.markdown("Transform your ideas and thoughts into engaging LinkedIn posts using different writing personas.")
     
-    # File upload
-    uploaded_file = st.file_uploader(
-        "Upload Transcript",
-        type=['txt'],
-        help="Upload a .txt file containing the transcript you want to analyze"
-    )
+    # Persona and Settings Section
+    st.subheader("🎭 Writing Settings")
     
-    if uploaded_file is not None:
-        # Read the file
-        transcript_content = str(uploaded_file.read(), "utf-8")
+    try:
+        # Get available personas
+        all_personas = gary_bot.get_all_personas()
+        default_persona = gary_bot.get_default_persona()
         
-        with st.expander("📄 View Raw Transcript", expanded=False):
-            st.text_area("Raw Transcript", transcript_content, height=200, disabled=True)
+        if not all_personas:
+            st.warning("⚠️ No personas found. Please set up personas in Settings first.")
+            return
         
-        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
         
-        # Processing options
-        col1, col2 = st.columns(2)
         with col1:
-            auto_generate = st.checkbox("🤖 Auto-generate from top snippet", value=True)
-            num_candidates = st.slider("Number of viral candidates to show", 1, 10, 5)
+            # Persona selection
+            persona_options = {}
+            for persona in all_personas:
+                display_name = f"{persona.name}"
+                if persona.is_default:
+                    display_name += " (Default)"
+                persona_options[display_name] = persona.id
+            
+            # Find default index
+            default_index = 0
+            if default_persona:
+                for i, (display, pid) in enumerate(persona_options.items()):
+                    if pid == default_persona.id:
+                        default_index = i
+                        break
+            
+            selected_persona_display = st.selectbox(
+                "🎭 Writing Persona",
+                list(persona_options.keys()),
+                index=default_index,
+                help="Choose the writing style and voice for your posts"
+            )
+            selected_persona_id = persona_options[selected_persona_display]
+            selected_persona = gary_bot.get_persona_by_id(selected_persona_id)
         
         with col2:
-            num_variations = st.slider("Number of post variations", 1, 5, 3)
-            analysis_enabled = st.checkbox("📊 Include viral analysis", value=True)
+            # Hooks toggle
+            use_hooks = st.checkbox(
+                "🪝 Use Writing Hooks", 
+                value=True,
+                help="Include writing hooks and templates to improve post quality"
+            )
         
-        # Persona selection for generation
-        st.markdown("### 🎭 Persona Selection")
-        try:
-            all_personas = gary_bot.get_all_personas()
-            active_personas = [p for p in all_personas if p.is_active]
+        with col3:
+            # Number of variations
+            num_variations = st.slider("Number of variations", 1, 5, 3)
+        
+        # Show selected persona info
+        if selected_persona:
+            with st.expander(f"👤 About {selected_persona.name}", expanded=False):
+                st.markdown(f"**Description:** {selected_persona.description}")
+                st.markdown(f"**Voice & Tone:** {selected_persona.voice_tone}")
+                st.markdown(f"**Target Audience:** {selected_persona.target_audience}")
+                if selected_persona.content_types:
+                    st.markdown(f"**Specializes in:** {', '.join(selected_persona.content_types)}")
+    
+    except Exception as e:
+        st.error(f"❌ Error loading personas: {str(e)}")
+        return
+    
+    st.markdown("---")
+    
+    # Input Methods
+    tab1, tab2 = st.tabs(["💡 From Ideas", "📄 From Transcript"])
+    
+    with tab1:
+        st.subheader("💡 Write from Ideas & Thoughts")
+        st.markdown("Enter your core idea, insight, or story and let the AI transform it into an engaging LinkedIn post.")
+        
+        # Idea input
+        idea_input = st.text_area(
+            "Enter your idea, insight, or story:",
+            height=150,
+            placeholder="e.g., 'I made a mistake that cost us $50k in revenue. Here's what I learned...' or 'Our team grew from 5 to 50 people this year. Scaling culture is harder than scaling code.' or just 'productivity tips for remote teams'"
+        )
+        
+        if idea_input and st.button("✍️ Generate Posts from Idea", type="primary"):
+            with st.spinner(f"✨ Writing posts using {selected_persona.name} style..."):
+                try:
+                    # Generate multiple variations using persona
+                    variations = gary_bot.generate_multiple_variations(
+                        idea_input, 
+                        num_variations=num_variations,
+                        persona_id=selected_persona_id,
+                        use_hooks=use_hooks
+                    )
+                    
+                    st.success(f"✅ Generated {len(variations)} post variations!")
+                    
+                    for i, post_text in enumerate(variations):
+                        display_post_variation(gary_bot, post_text, idea_input, i, selected_persona)
+                        
+                except Exception as e:
+                    st.error(f"❌ Error generating posts: {str(e)}")
+    
+    with tab2:
+        st.subheader("📄 Write from Transcript")
+        st.markdown("Upload a transcript and identify viral snippets to turn into posts.")
+        
+        # File upload
+        uploaded_file = st.file_uploader(
+            "Upload Transcript",
+            type=['txt'],
+            help="Upload a .txt file containing the transcript you want to analyze"
+        )
+        
+        if uploaded_file is not None:
+            # Read the file
+            transcript_content = str(uploaded_file.read(), "utf-8")
             
-            if active_personas:
-                persona_options = {"All Personas (Default)": None}
-                for persona in active_personas:
-                    display_name = f"{persona.name} {'(Default)' if persona.is_default else ''}"
-                    persona_options[display_name] = persona.id
+            with st.expander("📄 View Raw Transcript", expanded=False):
+                st.text_area("Raw Transcript", transcript_content, height=200, disabled=True)
+            
+            st.markdown("---")
+            
+            # Processing options
+            col1, col2 = st.columns(2)
+            with col1:
+                auto_generate = st.checkbox("🤖 Auto-generate from top snippet", value=True)
+                num_candidates = st.slider("Number of viral candidates to show", 1, 10, 5)
+            
+            with col2:
+                analysis_enabled = st.checkbox("📊 Include viral analysis", value=True)
+            
+            if st.button("🚀 Process Transcript & Generate Posts", type="primary"):
                 
-                selected_persona_name = st.selectbox(
-                    "Generate posts using persona style:",
-                    list(persona_options.keys()),
-                    help="Choose a specific persona to guide the writing style, or use all personas for general style"
+                with st.spinner("🔄 Processing transcript..."):
+                    try:
+                        # Run the full pipeline
+                        results = gary_bot.full_pipeline(transcript_content)
+                        
+                        st.success(f"✅ Processed {results['segments_count']} segments and found {len(results['viral_candidates'])} viral candidates!")
+                        
+                        # Show viral candidates
+                        st.subheader("🎯 Viral Snippet Candidates")
+                        
+                        if results['viral_candidates']:
+                            for i, candidate in enumerate(results['viral_candidates'][:num_candidates]):
+                                with st.expander(f"📋 Candidate #{candidate.rank} (Similarity: {candidate.similarity_score:.3f})", expanded=(i == 0)):
+                                    
+                                    st.markdown("**Snippet:**")
+                                    st.markdown(f'<div class="snippet-card">{candidate.text}</div>', unsafe_allow_html=True)
+                                    
+                                    if candidate.most_similar_post_text:
+                                        st.markdown("**Most Similar Gold Standard Post:**")
+                                        st.markdown(f"_{candidate.most_similar_post_text[:200]}..._")
+                                    
+                                    # Generate posts for this candidate
+                                    if st.button(f"✨ Generate Posts for Candidate {candidate.rank}", key=f"gen_{i}"):
+                                        generate_posts_for_snippet(gary_bot, candidate.text, num_variations, analysis_enabled, selected_persona_id, use_hooks)
+                        
+                        # Auto-generate from top candidate
+                        if auto_generate and results['viral_candidates']:
+                            st.markdown("---")
+                            st.subheader("🤖 Auto-Generated from Top Candidate")
+                            top_candidate = results['viral_candidates'][0]
+                            generate_posts_for_snippet(gary_bot, top_candidate.text, num_variations, analysis_enabled, selected_persona_id, use_hooks)
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error processing transcript: {str(e)}")
+                        st.error(traceback.format_exc())
+
+def display_post_variation(gary_bot: GaryBot, post_text: str, original_idea: str, variation_num: int, persona: any):
+    """Display a single post variation with actions."""
+    
+    st.markdown(f"### ✍️ Post Variation {variation_num + 1}")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Post preview
+        st.markdown(f'<div class="post-preview">{post_text}</div>', unsafe_allow_html=True)
+        
+        # Edit option
+        if st.checkbox(f"✏️ Edit Post {variation_num + 1}", key=f"edit_{variation_num}"):
+            edited_post = st.text_area(f"Edit Post {variation_num + 1}", post_text, height=200, key=f"edited_{variation_num}")
+            if st.button(f"💾 Save Edits", key=f"save_{variation_num}"):
+                post_text = edited_post
+                st.success("✅ Edits saved!")
+    
+    with col2:
+        # Analysis
+        st.markdown("**📊 Analysis**")
+        if st.button(f"🔍 Analyze", key=f"analyze_{variation_num}"):
+            with st.spinner("🔍 Analyzing..."):
+                analysis = gary_bot.analyze_post_potential(post_text)
+                
+                st.metric("Viral Score", f"{analysis['score']}/10")
+                st.metric("Predicted Engagement", analysis['engagement'])
+                
+                if analysis['strengths']:
+                    st.markdown("**💪 Strengths:**")
+                    for strength in analysis['strengths']:
+                        st.markdown(f"• {strength}")
+                
+                if analysis['improvements']:
+                    st.markdown("**🔧 Improvements:**")
+                    for improvement in analysis['improvements']:
+                        st.markdown(f"• {improvement}")
+        
+        # Action buttons
+        st.markdown("**🎯 Actions**")
+        
+        if st.button(f"✅ Save as Gold Standard", key=f"save_{variation_num}", type="primary"):
+            # Create save form
+            with st.form(f"save_form_{variation_num}"):
+                content_type = st.selectbox(f"Content Type", CONTENT_TYPES, key=f"content_type_{variation_num}")
+                keywords_input = st.text_input(f"Keywords (comma-separated)", key=f"keywords_{variation_num}")
+                
+                # Persona assignment
+                all_personas = gary_bot.get_all_personas()
+                persona_options = ["All Personas"] + [p.name for p in all_personas]
+                
+                selected_personas = st.multiselect(
+                    "Assign to Personas",
+                    persona_options,
+                    default=[persona.name] if persona else ["All Personas"],
+                    help="Choose which personas this post applies to"
                 )
                 
-                selected_persona_id = persona_options[selected_persona_name]
+                # Convert persona names to IDs
+                persona_ids = []
+                if "All Personas" not in selected_personas:
+                    for persona_name in selected_personas:
+                        for p in all_personas:
+                            if p.name == persona_name:
+                                persona_ids.append(p.id)
+                                break
                 
-                if selected_persona_id:
-                    # Show persona details
-                    selected_persona = next(p for p in active_personas if p.id == selected_persona_id)
-                    with st.expander(f"📋 {selected_persona.name} Details", expanded=False):
-                        st.markdown(f"**Description:** {selected_persona.description}")
-                        st.markdown(f"**Voice & Tone:** {selected_persona.voice_tone}")
-                        st.markdown(f"**Target Audience:** {selected_persona.target_audience}")
-                        if selected_persona.content_types:
-                            st.markdown(f"**Specializes in:** {', '.join(selected_persona.content_types)}")
-            else:
-                st.info("ℹ️ No active personas available. Posts will be generated with general style.")
-                selected_persona_id = None
-                
-        except Exception as e:
-            st.error(f"Error loading personas: {str(e)}")
-            selected_persona_id = None
+                if st.form_submit_button("💾 Save Post"):
+                    try:
+                        keywords = [k.strip() for k in keywords_input.split(",") if k.strip()] if keywords_input else []
+                        
+                        post_id = gary_bot.add_gold_standard_post(
+                            post_text, 
+                            keywords=keywords, 
+                            likes=0, 
+                            comments=0,
+                            content_type=content_type,
+                            title=f"Generated: {original_idea[:30]}...",
+                            author="Gary Lin",
+                            persona_ids=persona_ids
+                        )
+                        
+                        st.success(f"✅ Post saved as gold standard with ID: {post_id}")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error saving post: {str(e)}")
         
-        if st.button("🚀 Process Transcript & Generate Posts", type="primary"):
-            
-            with st.spinner("🔄 Processing transcript..."):
+        if st.button(f"🔄 Regenerate", key=f"regen_{variation_num}"):
+            feedback = st.text_input(f"Feedback for improvement", key=f"feedback_{variation_num}")
+            if feedback:
                 try:
-                    # Run the full pipeline with persona filter
-                    results = gary_bot.full_pipeline(transcript_content)
-                    
-                    st.success(f"✅ Processed {results['segments_count']} segments and found {len(results['viral_candidates'])} viral candidates!")
-                    
-                    # Show viral candidates
-                    st.subheader("🎯 Viral Snippet Candidates")
-                    
-                    if results['viral_candidates']:
-                        for i, candidate in enumerate(results['viral_candidates'][:num_candidates]):
-                            with st.expander(f"📋 Candidate #{candidate.rank} (Similarity: {candidate.similarity_score:.3f})", expanded=(i == 0)):
-                                
-                                st.markdown("**Snippet:**")
-                                st.markdown(f'<div class="snippet-card">{candidate.text}</div>', unsafe_allow_html=True)
-                                
-                                if candidate.most_similar_post_text:
-                                    st.markdown("**Most Similar Gold Standard Post:**")
-                                    st.markdown(f"_{candidate.most_similar_post_text[:200]}..._")
-                                
-                                # Generate posts for this candidate
-                                if st.button(f"✨ Generate Posts for Candidate {candidate.rank}", key=f"gen_{i}"):
-                                    generate_posts_for_snippet(gary_bot, candidate.text, num_variations, analysis_enabled, selected_persona_id)
-                    
-                    # Auto-generate from top candidate
-                    if auto_generate and results['viral_candidates']:
-                        st.markdown("---")
-                        st.subheader("🤖 Auto-Generated from Top Candidate")
-                        top_candidate = results['viral_candidates'][0]
-                        generate_posts_for_snippet(gary_bot, top_candidate.text, num_variations, analysis_enabled, selected_persona_id)
-                    
+                    new_post = gary_bot.regenerate_with_feedback(original_idea, post_text, feedback)
+                    st.markdown("**🆕 Regenerated Post:**")
+                    st.markdown(f'<div class="post-preview">{new_post}</div>', unsafe_allow_html=True)
                 except Exception as e:
-                    st.error(f"❌ Error processing transcript: {str(e)}")
-                    st.error(traceback.format_exc())
+                    st.error(f"❌ Error regenerating: {str(e)}")
+    
+    st.markdown("---")
 
-def generate_posts_for_snippet(gary_bot: GaryBot, snippet: str, num_variations: int, analysis_enabled: bool, persona_id: Optional[str] = None):
-    """Generate and display posts for a specific snippet."""
+def generate_posts_for_snippet(gary_bot: GaryBot, snippet: str, num_variations: int, analysis_enabled: bool, persona_id: str, use_hooks: bool):
+    """Generate and display posts for a specific snippet with persona."""
     
     with st.spinner("✨ Generating LinkedIn posts..."):
         try:
-            # Generate multiple variations with persona filter if specified
-            if persona_id:
-                # Get persona info for display
-                try:
-                    all_personas = gary_bot.get_all_personas()
-                    selected_persona = next(p for p in all_personas if p.id == persona_id)
-                    st.info(f"🎭 Generating posts using **{selected_persona.name}** persona style")
-                except:
-                    st.warning("⚠️ Selected persona not found, using default style")
+            # Generate multiple variations using persona
+            variations = gary_bot.generate_multiple_variations(
+                snippet, 
+                num_variations=num_variations,
+                persona_id=persona_id,
+                use_hooks=use_hooks
+            )
             
-            variations = gary_bot.generate_multiple_variations(snippet, num_variations)
+            persona = gary_bot.get_persona_by_id(persona_id)
             
             for i, post_text in enumerate(variations):
-                st.markdown(f"### 📝 Post Variation {i + 1}")
-                
-                col1, col2 = st.columns([2, 1])
-                
-                with col1:
-                    # Post preview
-                    st.markdown(f'<div class="post-preview">{post_text}</div>', unsafe_allow_html=True)
-                    
-                    # Edit option
-                    if st.checkbox(f"✏️ Edit Post {i + 1}", key=f"edit_{i}"):
-                        edited_post = st.text_area(f"Edit Post {i + 1}", post_text, height=200, key=f"edited_{i}")
-                        if st.button(f"💾 Save Edits", key=f"save_{i}"):
-                            post_text = edited_post
-                            st.success("✅ Edits saved!")
-                
-                with col2:
-                    # Analysis
-                    if analysis_enabled:
-                        with st.spinner("🔍 Analyzing..."):
-                            analysis = gary_bot.analyze_post_potential(post_text)
-                            
-                            st.markdown("**📊 Viral Analysis**")
-                            st.metric("Viral Score", f"{analysis['score']}/10")
-                            st.metric("Predicted Engagement", analysis['engagement'])
-                            
-                            if analysis['strengths']:
-                                st.markdown("**💪 Strengths:**")
-                                for strength in analysis['strengths']:
-                                    st.markdown(f"• {strength}")
-                            
-                            if analysis['improvements']:
-                                st.markdown("**🔧 Improvements:**")
-                                for improvement in analysis['improvements']:
-                                    st.markdown(f"• {improvement}")
-                    
-                    # Action buttons
-                    st.markdown("**🎯 Actions**")
-                    
-                    if st.button(f"✅ Approve & Save", key=f"approve_{i}", type="primary"):
-                        # Create draft object
-                        draft = GeneratedPostDraft(
-                            original_snippet=snippet,
-                            draft_text=post_text,
-                            suggested_hashtags=[],
-                            rag_context_ids=[]
-                        )
-                        
-                        # Content type selection
-                        content_type = st.selectbox(f"Content Type for Post {i + 1}", CONTENT_TYPES, key=f"content_type_{i}")
-                        
-                        # Keywords
-                        keywords_input = st.text_input(f"Keywords (comma-separated)", key=f"keywords_{i}")
-                        keywords = [k.strip() for k in keywords_input.split(",") if k.strip()] if keywords_input else []
-                        
-                        # Persona assignment for saved post
-                        persona_ids_for_save = []
-                        if persona_id:
-                            persona_ids_for_save = [persona_id]
-                        
-                        post_id = gary_bot.approve_post(draft, keywords, content_type)
-                        
-                        # Update persona assignment if needed
-                        if persona_ids_for_save:
-                            gary_bot.update_post_personas(post_id, persona_ids_for_save)
-                        
-                        st.success(f"✅ Post approved and saved with ID: {post_id}")
-                        if persona_id:
-                            try:
-                                all_personas = gary_bot.get_all_personas()
-                                assigned_persona = next(p for p in all_personas if p.id == persona_id)
-                                st.info(f"🎭 Assigned to persona: {assigned_persona.name}")
-                            except:
-                                st.info(f"🎭 Assigned to selected persona")
-                    
-                    if st.button(f"🔄 Regenerate", key=f"regen_{i}"):
-                        feedback = st.text_input(f"Feedback for improvement", key=f"feedback_{i}")
-                        if feedback:
-                            new_post = gary_bot.regenerate_with_feedback(snippet, post_text, feedback)
-                            st.markdown("**🆕 Regenerated Post:**")
-                            st.markdown(f'<div class="post-preview">{new_post}</div>', unsafe_allow_html=True)
-                
-                st.markdown("---")
+                display_post_variation(gary_bot, post_text, snippet, i, persona)
                 
         except Exception as e:
             st.error(f"❌ Error generating posts: {str(e)}")
@@ -615,31 +694,13 @@ def post_history_page(gary_bot: GaryBot):
             return
         
         # Filters
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
             filter_type = st.selectbox("Filter by Type", ["All", "Gold Standard", "Generated"], key="history_filter")
         with col2:
             sort_by = st.selectbox("Sort by", ["Creation Date", "Title", "Author", "Likes", "Comments", "Engagement"], key="history_sort")
         with col3:
             show_count = st.slider("Posts to show", 5, 50, 20, key="history_count")
-        with col4:
-            # Persona filter
-            try:
-                all_personas = gary_bot.get_all_personas()
-                persona_filter_options = {"All Personas": None}
-                for persona in all_personas:
-                    persona_filter_options[persona.name] = persona.id
-                
-                selected_persona_filter = st.selectbox(
-                    "Filter by Persona", 
-                    list(persona_filter_options.keys()),
-                    key="persona_filter"
-                )
-                persona_filter_id = persona_filter_options[selected_persona_filter]
-                
-            except Exception as e:
-                st.error(f"Error loading personas for filter: {str(e)}")
-                persona_filter_id = None
         
         # Filter posts
         filtered_posts = posts
@@ -647,11 +708,6 @@ def post_history_page(gary_bot: GaryBot):
             filtered_posts = [p for p in posts if p.is_gold_standard]
         elif filter_type == "Generated":
             filtered_posts = [p for p in posts if not p.is_gold_standard]
-        
-        # Filter by persona
-        if persona_filter_id:
-            filtered_posts = [p for p in filtered_posts 
-                            if hasattr(p, 'persona_ids') and p.persona_ids and persona_filter_id in p.persona_ids]
         
         # Sort posts
         if sort_by == "Title":
@@ -697,20 +753,6 @@ def post_history_page(gary_bot: GaryBot):
                     
                     if post.content_type:
                         st.markdown(f"**📂 Content Type:** {post.content_type}")
-                    
-                    # Display persona assignments
-                    if hasattr(post, 'persona_ids') and post.persona_ids:
-                        try:
-                            all_personas = gary_bot.get_all_personas()
-                            assigned_personas = [p.name for p in all_personas if p.id in post.persona_ids]
-                            if assigned_personas:
-                                st.markdown(f"**🎭 Personas:** {', '.join(assigned_personas)}")
-                            else:
-                                st.markdown(f"**🎭 Personas:** Unknown personas (IDs: {', '.join(post.persona_ids)})")
-                        except Exception as e:
-                            st.markdown(f"**🎭 Personas:** {len(post.persona_ids)} assigned")
-                    else:
-                        st.markdown("**🎭 Personas:** Applies to all personas")
                     
                     st.markdown(f"**📅 Created:** {post.created_at.strftime('%Y-%m-%d %H:%M')}")
                 
@@ -831,7 +873,7 @@ def manage_rag_page(gary_bot: GaryBot):
                                 id=guideline_data['id'],
                                 title=guideline_data['title'],
                                 content=guideline_data['content'],
-                                hook_type=guideline_data['hook_type'],
+                                document_type=guideline_data['document_type'],
                                 section=guideline_data.get('section'),
                                 embedding=None,
                                 created_at=datetime.fromisoformat(guideline_data['created_at']),
@@ -929,7 +971,7 @@ def manage_rag_page(gary_bot: GaryBot):
                                     "id": guideline.id,
                                     "title": guideline.title,
                                     "content": guideline.content,
-                                    "hook_type": guideline.hook_type,
+                                    "document_type": guideline.document_type,
                                     "section": guideline.section,
                                     "created_at": guideline.created_at.isoformat(),
                                     "priority": guideline.priority
@@ -1075,9 +1117,10 @@ def manage_rag_page(gary_bot: GaryBot):
                                     continue
                                 
                                 guideline = GuidelineDocument(
+                                    id="",
                                     title=f"{doc_type.title()} - {line[:50]}...",
                                     content=line,
-                                    hook_type=doc_type,
+                                    document_type=doc_type,
                                     section=current_section,
                                     priority=priority
                                 )
@@ -1114,9 +1157,10 @@ def manage_rag_page(gary_bot: GaryBot):
                         from src.models import GuidelineDocument
                         
                         guideline = GuidelineDocument(
+                            id="",
                             title=guideline_title,
                             content=guideline_content,
-                            hook_type=guideline_type,
+                            document_type=guideline_type,
                             section=guideline_section or None,
                             priority=guideline_priority
                         )
@@ -1140,7 +1184,7 @@ def manage_rag_page(gary_bot: GaryBot):
                 # Statistics
                 type_counts = {}
                 for guideline in all_guidelines:
-                    doc_type = guideline.hook_type
+                    doc_type = guideline.document_type
                     type_counts[doc_type] = type_counts.get(doc_type, 0) + 1
                 
                 st.markdown(f"**Total Guidelines: {len(all_guidelines)}**")
@@ -1159,7 +1203,7 @@ def manage_rag_page(gary_bot: GaryBot):
                 # Display guidelines
                 filtered_guidelines = all_guidelines
                 if filter_type != "All":
-                    filtered_guidelines = [g for g in all_guidelines if g.hook_type == filter_type]
+                    filtered_guidelines = [g for g in all_guidelines if g.document_type == filter_type]
                 
                 if show_limit != "All":
                     filtered_guidelines = filtered_guidelines[:int(show_limit)]
@@ -1240,24 +1284,24 @@ def manage_rag_page(gary_bot: GaryBot):
                             st.session_state[bulk_selection_key] = bulk_selected
                     
                     with col_expand:
-                        with st.expander(f"📋 {guideline.title} ({guideline.hook_type})", expanded=False):
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.markdown(f"**Section:** {guideline.section or 'General'}")
-                            st.markdown(f"**Priority:** {guideline.priority}")
-                            st.markdown(f"**Content:**\n{guideline.content}")
-                        with col2:
+                        with st.expander(f"📋 {guideline.title} ({guideline.document_type})", expanded=False):
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                st.markdown(f"**Section:** {guideline.section or 'General'}")
+                                st.markdown(f"**Priority:** {guideline.priority}")
+                                st.markdown(f"**Content:**\n{guideline.content}")
+                            with col2:
                                 # Individual delete button
-                            if st.button("🗑️ Delete", key=f"del_guideline_{i}"):
+                                if st.button("🗑️ Delete", key=f"del_guideline_{i}"):
                                     if st.session_state.get(f"confirm_delete_guideline_{guideline.id}", False):
-                                if gary_bot.rag_system.delete_guideline(guideline.id):
-                                    st.success("✅ Guideline deleted!")
+                                        if gary_bot.rag_system.delete_guideline(guideline.id):
+                                            st.success("✅ Guideline deleted!")
                                             # Remove from bulk selection if it was selected
                                             bulk_selected.discard(guideline.id)
                                             st.session_state[bulk_selection_key] = bulk_selected
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Failed to delete guideline")
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ Failed to delete guideline")
                                     else:
                                         st.session_state[f"confirm_delete_guideline_{guideline.id}"] = True
                                         st.warning("⚠️ Click again to confirm deletion")
@@ -1301,39 +1345,6 @@ def manage_rag_page(gary_bot: GaryBot):
             with col2:
                 comments = st.number_input("Comments", min_value=0, value=0, key="add_comments")
             
-            # Persona assignment section
-            st.markdown("### 🎭 Persona Assignment")
-            try:
-                all_personas = gary_bot.get_all_personas()
-                if all_personas:
-                    # Show available personas
-                    active_personas = [p for p in all_personas if p.is_active]
-                    
-                    if active_personas:
-                        persona_options = {}
-                        for persona in active_personas:
-                            display_name = f"{persona.name} {'(Default)' if persona.is_default else ''}"
-                            persona_options[display_name] = persona.id
-                        
-                        selected_persona_names = st.multiselect(
-                            "Assign to Personas (leave empty to apply to all personas)",
-                            list(persona_options.keys()),
-                            help="Select which personas this post should be associated with. Empty = applies to all personas."
-                        )
-                        
-                        # Convert display names back to IDs
-                        selected_persona_ids = [persona_options[name] for name in selected_persona_names]
-                    else:
-                        st.info("ℹ️ No active personas available. Post will apply to all personas.")
-                        selected_persona_ids = []
-                else:
-                    st.info("ℹ️ No personas found. Create personas in Settings to assign posts.")
-                    selected_persona_ids = []
-                    
-            except Exception as e:
-                st.error(f"Error loading personas: {str(e)}")
-                selected_persona_ids = []
-            
             # Advanced options in an expander
             with st.expander("🔧 Advanced Options (Optional)", expanded=False):
                 col1, col2 = st.columns(2)
@@ -1360,7 +1371,7 @@ def manage_rag_page(gary_bot: GaryBot):
                         if 'manual_content_type' in locals() and manual_content_type != "Auto-detect":
                             content_type = manual_content_type
                         
-                        # Add the post with persona assignment
+                        # Add the post (will auto-extract if keywords/content_type are None)
                         post_id = gary_bot.add_gold_standard_post(
                             post_text, 
                             keywords=keywords_list, 
@@ -1368,19 +1379,10 @@ def manage_rag_page(gary_bot: GaryBot):
                             comments=comments,
                             content_type=content_type,
                             title=title if title else None,
-                            author=author if author else None,
-                            persona_ids=selected_persona_ids  # Add persona assignment
+                            author=author if author else None
                         )
                         
                         st.success(f"✅ Successfully added gold standard post!")
-                        if selected_persona_ids:
-                            try:
-                                assigned_personas = [p.name for p in all_personas if p.id in selected_persona_ids]
-                                st.info(f"🎭 Assigned to personas: {', '.join(assigned_personas)}")
-                            except:
-                                st.info(f"🎭 Assigned to {len(selected_persona_ids)} persona(s)")
-                        else:
-                            st.info("🎭 Applies to all personas")
                         st.info("🤖 Check the console output above for extracted keywords and content type.")
                         
                 except Exception as e:
@@ -1521,92 +1523,77 @@ def manage_rag_page(gary_bot: GaryBot):
                                 if post.content_type:
                                     st.markdown(f"**📂 Type:** {post.content_type}")
                                 
-                                # Display persona assignments
-                                if hasattr(post, 'persona_ids') and post.persona_ids:
-                                    try:
+                                # Show persona assignments
+                                try:
+                                    if post.persona_ids:
                                         all_personas = gary_bot.get_all_personas()
                                         assigned_personas = [p.name for p in all_personas if p.id in post.persona_ids]
                                         if assigned_personas:
                                             st.markdown(f"**🎭 Personas:** {', '.join(assigned_personas)}")
                                         else:
                                             st.markdown(f"**🎭 Personas:** Unknown personas (IDs: {', '.join(post.persona_ids)})")
-                                    except Exception as e:
-                                        st.markdown(f"**🎭 Personas:** {len(post.persona_ids)} assigned")
-                                else:
-                                    st.markdown("**🎭 Personas:** Applies to all personas")
+                                    else:
+                                        st.markdown(f"**🎭 Personas:** All Personas")
+                                except Exception as e:
+                                    st.markdown(f"**🎭 Personas:** Error loading ({str(e)})")
                                 
                                 st.markdown(f"**📅 Created:** {post.created_at.strftime('%Y-%m-%d %H:%M')}")
                             
                             with col2:
-                                st.markdown("**📊 Metrics**")
-                                st.metric("👍 Likes", post.likes)
-                                st.metric("💬 Comments", post.comments)
-                                st.metric("🔥 Total", post.likes + post.comments)
+                                st.markdown(f"**👍 Likes:** {post.likes}")
+                                st.markdown(f"**💬 Comments:** {post.comments}")
+                                st.markdown(f"**🔥 Engagement:** {post.likes + post.comments}")
                                 
                                 if post.is_gold_standard:
                                     st.success("🌟 Gold Standard")
                                 
-                                # Action buttons
-                                st.markdown("**⚡ Actions**")
+                                # Persona assignment section
+                                st.markdown("**🎭 Manage Personas**")
                                 
-                                # Update engagement - use checkbox instead of expander
-                                show_engagement_form = st.checkbox("📈 Update Engagement", key=f"show_engagement_{post.id}")
-                                if show_engagement_form:
-                                    new_likes = st.number_input("Likes", value=post.likes, min_value=0, key=f"edit_likes_{post.id}")
-                                    new_comments = st.number_input("Comments", value=post.comments, min_value=0, key=f"edit_comments_{post.id}")
-                                    
-                                    if st.button("💾 Update", key=f"update_{post.id}"):
-                                        success = gary_bot.update_post_engagement(post.id, new_likes, new_comments)
-                                        if success:
-                                            st.success("✅ Updated!")
-                                            st.rerun()
-                                        else:
-                                            st.error("❌ Failed to update")
-                                
-                                # Edit persona assignments
-                                show_persona_form = st.checkbox("🎭 Edit Personas", key=f"show_personas_{post.id}")
-                                if show_persona_form:
-                                    try:
-                                        all_personas = gary_bot.get_all_personas()
-                                        active_personas = [p for p in all_personas if p.is_active]
+                                try:
+                                    all_personas = gary_bot.get_all_personas()
+                                    if all_personas:
+                                        # Current assignments
+                                        current_assignments = post.persona_ids if post.persona_ids else []
+                                        current_persona_names = []
+                                        if current_assignments:
+                                            current_persona_names = [p.name for p in all_personas if p.id in current_assignments]
                                         
-                                        if active_personas:
-                                            # Current assignments
-                                            current_assignments = post.persona_ids if hasattr(post, 'persona_ids') and post.persona_ids else []
+                                        # Create options list
+                                        persona_options = ["All Personas"] + [p.name for p in all_personas]
+                                        
+                                        # Set default selection
+                                        default_selection = current_persona_names if current_persona_names else ["All Personas"]
+                                        
+                                        new_persona_selection = st.multiselect(
+                                            "Assign to Personas:",
+                                            persona_options,
+                                            default=default_selection,
+                                            key=f"personas_{post.id}",
+                                            help="Choose which personas this post applies to"
+                                        )
+                                        
+                                        if st.button(f"💾 Update Personas", key=f"update_personas_{post.id}"):
+                                            # Convert names to IDs
+                                            new_persona_ids = []
+                                            if "All Personas" not in new_persona_selection:
+                                                for persona_name in new_persona_selection:
+                                                    for p in all_personas:
+                                                        if p.name == persona_name:
+                                                            new_persona_ids.append(p.id)
+                                                            break
                                             
-                                            # Create persona options with current selection
-                                            persona_options = {}
-                                            default_selection = []
-                                            
-                                            for persona in active_personas:
-                                                display_name = f"{persona.name} {'(Default)' if persona.is_default else ''}"
-                                                persona_options[display_name] = persona.id
-                                                if persona.id in current_assignments:
-                                                    default_selection.append(display_name)
-                                            
-                                            # Multi-select for persona assignment
-                                            new_persona_names = st.multiselect(
-                                                "Assign to Personas",
-                                                list(persona_options.keys()),
-                                                default=default_selection,
-                                                key=f"personas_{post.id}",
-                                                help="Leave empty to apply to all personas"
-                                            )
-                                            
-                                            # Convert back to IDs
-                                            new_persona_ids = [persona_options[name] for name in new_persona_names]
-                                            
-                                            if st.button("💾 Update Personas", key=f"update_personas_{post.id}"):
-                                                success = gary_bot.update_post_personas(post.id, new_persona_ids)
-                                                if success:
-                                                    st.success("✅ Personas updated!")
-                                                    st.rerun()
-                                                else:
-                                                    st.error("❌ Failed to update personas")
-                                        else:
-                                            st.warning("No active personas available")
-                                    except Exception as e:
-                                        st.error(f"Error loading personas: {str(e)}")
+                                            success = gary_bot.update_post_personas(post.id, new_persona_ids)
+                                            if success:
+                                                st.success("✅ Personas updated!")
+                                                st.rerun()
+                                            else:
+                                                st.error("❌ Failed to update personas")
+                                    else:
+                                        st.info("No personas available")
+                                        
+                                except Exception as e:
+                                    st.error(f"Error managing personas: {str(e)}")
                                 
                                 # Individual delete button
                                 if st.button("🗑️ Delete Post", key=f"delete_{post.id}", type="secondary"):
@@ -1921,8 +1908,8 @@ def settings_page(gary_bot: GaryBot):
     st.markdown("If you prefer to use environment variables instead of the UI configuration above:")
     
     with st.expander("📝 View .env File Template", expanded=False):
-    st.markdown("""
-    ```bash
+        st.markdown("""
+        ```bash
         # Choose your provider
         LLM_PROVIDER=openai                 # or "groq"
         
@@ -1936,9 +1923,9 @@ def settings_page(gary_bot: GaryBot):
         OPENAI_MODEL=gpt-4o                # For OpenAI - Latest flagship
         
         # Other Settings
-    EMBEDDING_MODEL=all-MiniLM-L6-v2
-    RAG_RETRIEVAL_COUNT=3
-    DEFAULT_TEMPERATURE=0.7
+        EMBEDDING_MODEL=all-MiniLM-L6-v2
+        RAG_RETRIEVAL_COUNT=3
+        DEFAULT_TEMPERATURE=0.7
         ```
         """)
         
@@ -2022,390 +2009,6 @@ def settings_page(gary_bot: GaryBot):
             st.markdown("• Verify your internet connection")
             st.markdown("• Make sure you have credits (for OpenAI)")
             st.markdown("• Restart the application after changing .env")
-
-    st.markdown("---")
-    
-    # Persona Management Section
-    st.subheader("🎭 Persona Management")
-    st.markdown("Create and manage writing personas to customize your post generation style.")
-    
-    # Quick stats
-    try:
-        all_personas = gary_bot.get_all_personas()
-        default_persona = gary_bot.get_default_persona()
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Personas", len(all_personas))
-        with col2:
-            st.metric("Default Persona", default_persona.name if default_persona else "None")
-        with col3:
-            active_count = sum(1 for p in all_personas if p.is_active)
-            st.metric("Active Personas", active_count)
-    except Exception as e:
-        st.error(f"Error loading persona stats: {str(e)}")
-    
-    # Persona management tabs
-    persona_tab1, persona_tab2, persona_tab3 = st.tabs(["➕ Create New", "📋 View All", "🔧 Quick Actions"])
-    
-    with persona_tab1:
-        # Create New Persona
-        st.subheader("➕ Create New Persona")
-        
-        with st.form("create_persona"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                persona_name = st.text_input(
-                    "Persona Name*",
-                    placeholder="e.g., Gary Lin - Technical Expert",
-                    help="A descriptive name for this writing persona"
-                )
-                
-                voice_tone = st.text_area(
-                    "Voice & Tone*",
-                    height=100,
-                    placeholder="e.g., Confident, approachable, and data-driven. Uses storytelling with technical insights.",
-                    help="Describe the personality and tone of voice"
-                )
-                
-                target_audience = st.text_input(
-                    "Target Audience*",
-                    placeholder="e.g., Tech founders, CTOs, and engineering managers",
-                    help="Who is this persona writing for?"
-                )
-            
-            with col2:
-                description = st.text_area(
-                    "Description*",
-                    height=100,
-                    placeholder="e.g., Technical founder with 10+ years experience sharing engineering insights and startup lessons.",
-                    help="Brief description of this persona"
-                )
-                
-                content_types = st.multiselect(
-                    "Content Specializations",
-                    CONTENT_TYPES,
-                    help="What types of content does this persona excel at?"
-                )
-                
-                col_default, col_active = st.columns(2)
-                with col_default:
-                    is_default = st.checkbox("Set as Default Persona", help="Make this the default persona for post generation")
-                with col_active:
-                    is_active = st.checkbox("Active", value=True, help="Whether this persona is available for use")
-            
-            # Style guide
-            style_guide = st.text_area(
-                "Style Guide (Optional)",
-                height=120,
-                placeholder="e.g., Always start with a hook, use short paragraphs, include data when possible, end with actionable takeaways...",
-                help="Specific writing guidelines and preferences for this persona"
-            )
-            
-            # Example hooks
-            example_hooks_text = st.text_area(
-                "Example Hooks (Optional)",
-                height=80,
-                placeholder="Enter example hooks, one per line",
-                help="Example opening hooks that this persona might use"
-            )
-            
-            if st.form_submit_button("🎭 Create Persona", type="primary"):
-                if persona_name and voice_tone and target_audience and description:
-                    try:
-                        # Parse example hooks
-                        example_hooks = []
-                        if example_hooks_text:
-                            example_hooks = [hook.strip() for hook in example_hooks_text.split('\n') if hook.strip()]
-                        
-                        persona_id = gary_bot.create_persona(
-                            name=persona_name,
-                            description=description,
-                            voice_tone=voice_tone,
-                            content_types=content_types,
-                            style_guide=style_guide,
-                            example_hooks=example_hooks,
-                            target_audience=target_audience,
-                            is_default=is_default,
-                            is_active=is_active
-                        )
-                        
-                        st.success(f"✅ Created persona: {persona_name}")
-                        st.info(f"Persona ID: {persona_id}")
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"❌ Error creating persona: {str(e)}")
-                else:
-                    st.error("❌ Please fill in all required fields (marked with *)")
-    
-    with persona_tab2:
-        # View All Personas
-        st.subheader("📋 All Personas")
-        
-        try:
-            all_personas = gary_bot.get_all_personas()
-            
-            if not all_personas:
-                st.info("📭 No personas found. Create your first persona in the 'Create New' tab.")
-            else:
-                for i, persona in enumerate(all_personas):
-                    with st.expander(
-                        f"🎭 {persona.name} {'(Default)' if persona.is_default else ''} {'(Inactive)' if not persona.is_active else ''}",
-                        expanded=False
-                    ):
-                        col1, col2 = st.columns([2, 1])
-                        
-                        with col1:
-                            st.markdown(f"**Description:** {persona.description}")
-                            st.markdown(f"**Voice & Tone:** {persona.voice_tone}")
-                            st.markdown(f"**Target Audience:** {persona.target_audience}")
-                            
-                            if persona.content_types:
-                                st.markdown(f"**Specializes in:** {', '.join(persona.content_types)}")
-                            
-                            if persona.style_guide:
-                                with st.expander("📝 Style Guide", expanded=False):
-                                    st.markdown(persona.style_guide)
-                            
-                            if persona.example_hooks:
-                                with st.expander("🪝 Example Hooks", expanded=False):
-                                    for hook in persona.example_hooks:
-                                        st.markdown(f"• {hook}")
-                        
-                        with col2:
-                            st.markdown("**Status**")
-                            if persona.is_default:
-                                st.success("🌟 Default Persona")
-                            if persona.is_active:
-                                st.success("✅ Active")
-                            else:
-                                st.warning("⏸️ Inactive")
-                            
-                            st.markdown(f"**Created:** {persona.created_at.strftime('%Y-%m-%d')}")
-                            
-                            # Delete button with confirmation
-                            delete_key = f"delete_persona_{persona.id}"
-                            if st.button(f"🗑️ Delete", key=delete_key):
-                                if st.session_state.get(f"confirm_{delete_key}", False):
-                                    try:
-                                        success = gary_bot.delete_persona(persona.id)
-                                        if success:
-                                            st.success(f"✅ Deleted persona: {persona.name}")
-                                            st.session_state[f"confirm_{delete_key}"] = False
-                                            st.rerun()
-                                        else:
-                                            st.error("❌ Failed to delete persona")
-                                    except Exception as e:
-                                        st.error(f"❌ Error deleting persona: {str(e)}")
-                                else:
-                                    st.session_state[f"confirm_{delete_key}"] = True
-                                    st.warning("⚠️ Click again to confirm deletion")
-                
-        except Exception as e:
-            st.error(f"❌ Error loading personas: {str(e)}")
-    
-    with persona_tab3:
-        # Quick Actions
-        st.subheader("🔧 Quick Actions")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🎭 Create Gary Lin Default Persona", type="primary"):
-                try:
-                    persona_id = gary_bot.create_gary_lin_persona()
-                    st.success(f"✅ Created Gary Lin persona: {persona_id}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error creating persona: {str(e)}")
-        
-        with col2:
-            try:
-                personas = gary_bot.get_all_personas()
-                st.metric("Total Personas", len(personas))
-                
-                default_persona = gary_bot.get_default_persona()
-                if default_persona:
-                    st.info(f"Default: {default_persona.name}")
-                else:
-                    st.warning("No default persona set")
-            except Exception as e:
-                st.error(f"Error loading stats: {str(e)}")
-
-    st.markdown("---")
-    
-    # Alternative: Environment Configuration
-    
-    st.markdown("---")
-    
-    # Content Type Management Section
-    st.subheader("📂 Content Type Management")
-    st.markdown("Manage the content verticals available for categorizing your posts and personas.")
-    
-    # Quick stats
-    try:
-        current_content_types = load_content_types()
-        st.metric("Total Content Types", len(current_content_types))
-    except Exception as e:
-        st.error(f"Error loading content types: {str(e)}")
-        current_content_types = CONTENT_TYPES
-    
-    # Content type management tabs
-    content_tab1, content_tab2, content_tab3 = st.tabs(["➕ Add New", "📋 View & Edit", "🔄 Reset to Default"])
-    
-    with content_tab1:
-        # Add New Content Type
-        st.subheader("➕ Add New Content Type")
-        
-        with st.form("add_content_type"):
-            new_content_type = st.text_input(
-                "New Content Type",
-                placeholder="e.g., Product Announcements",
-                help="Enter a new content vertical/category"
-            )
-            
-            if st.form_submit_button("📂 Add Content Type", type="primary"):
-                if new_content_type and new_content_type.strip():
-                    new_type = new_content_type.strip()
-                    if new_type not in current_content_types:
-                        success = add_content_type(new_type)
-                        if success:
-                            st.success(f"✅ Added content type: {new_type}")
-                            # Reload content types
-                            reload_content_types()
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to add content type")
-                    else:
-                        st.warning("⚠️ Content type already exists")
-                else:
-                    st.error("❌ Please enter a valid content type name")
-    
-    with content_tab2:
-        # View & Edit Content Types
-        st.subheader("📋 Current Content Types")
-        
-        try:
-            current_content_types = load_content_types()
-            
-            if not current_content_types:
-                st.info("📭 No content types found.")
-            else:
-                st.markdown("**Current content verticals:**")
-                
-                # Display content types with edit/delete options
-                for i, content_type in enumerate(current_content_types):
-                    col1, col2, col3 = st.columns([3, 1, 1])
-                    
-                    with col1:
-                        # Editable content type
-                        edit_key = f"edit_content_type_{i}"
-                        if st.session_state.get(f"editing_{i}", False):
-                            new_value = st.text_input(
-                                f"Edit content type",
-                                value=content_type,
-                                key=f"input_{i}",
-                                label_visibility="collapsed"
-                            )
-                        else:
-                            st.markdown(f"**{i + 1}.** {content_type}")
-                    
-                    with col2:
-                        # Edit button
-                        if st.session_state.get(f"editing_{i}", False):
-                            if st.button("💾 Save", key=f"save_{i}"):
-                                new_value = st.session_state.get(f"input_{i}", content_type)
-                                if new_value and new_value != content_type:
-                                    success = update_content_type(content_type, new_value)
-                                    if success:
-                                        st.success(f"✅ Updated: {content_type} → {new_value}")
-                                        reload_content_types()
-                                        st.session_state[f"editing_{i}"] = False
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Failed to update content type")
-                                else:
-                                    st.session_state[f"editing_{i}"] = False
-                                    st.rerun()
-                        else:
-                            if st.button("✏️ Edit", key=f"edit_{i}"):
-                                st.session_state[f"editing_{i}"] = True
-                                st.rerun()
-                    
-                    with col3:
-                        # Delete button
-                        if not st.session_state.get(f"editing_{i}", False):
-                            delete_key = f"delete_content_{i}"
-                            if st.button("🗑️", key=delete_key):
-                                if st.session_state.get(f"confirm_delete_content_{i}", False):
-                                    success = remove_content_type(content_type)
-                                    if success:
-                                        st.success(f"✅ Deleted: {content_type}")
-                                        reload_content_types()
-                                        st.session_state[f"confirm_delete_content_{i}"] = False
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Failed to delete content type")
-                                else:
-                                    st.session_state[f"confirm_delete_content_{i}"] = True
-                                    st.warning("⚠️ Click again to confirm deletion")
-                
-                st.markdown("---")
-                st.markdown("**💡 Tips:**")
-                st.markdown("• Content types help categorize your posts and personas")
-                st.markdown("• Changes take effect immediately across the application")
-                st.markdown("• Be careful when deleting - existing posts may reference these types")
-                
-        except Exception as e:
-            st.error(f"❌ Error loading content types: {str(e)}")
-    
-    with content_tab3:
-        # Reset to Default
-        st.subheader("🔄 Reset to Default")
-        
-        st.markdown("**Current defaults:**")
-        default_types = [
-            "Founder Real Talk, building SaaS",
-            "Event Moments & Ecosystem Takes",
-            "Memes & Fun",
-            "Team, Culture & Leadership", 
-            "Analytics Insight",
-            "Explo product Updates"
-        ]
-        
-        for dt in default_types:
-            st.markdown(f"• {dt}")
-        
-        st.markdown("---")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🔄 Reset to Defaults", type="secondary"):
-                if st.session_state.get("confirm_reset_content_types", False):
-                    success = save_content_types(default_types)
-                    if success:
-                        st.success("✅ Content types reset to defaults!")
-                        reload_content_types()
-                        st.session_state["confirm_reset_content_types"] = False
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to reset content types")
-                else:
-                    st.session_state["confirm_reset_content_types"] = True
-                    st.warning("⚠️ Click again to confirm reset")
-        
-        with col2:
-            current_count = len(load_content_types())
-            default_count = len(default_types)
-            st.info(f"Current: {current_count} types")
-            st.info(f"Default: {default_count} types")
-
-    st.markdown("---")
-    
-    # Alternative: Environment Configuration
 
 if __name__ == "__main__":
     main() 

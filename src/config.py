@@ -1,5 +1,7 @@
 import os
-from typing import Optional
+import json
+from typing import Optional, List
+from datetime import datetime
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
@@ -143,14 +145,91 @@ AVAILABLE_EMBEDDING_MODELS = {
     "all-MiniLM-L12-v2": "Balanced (384 dimensions)",
 }
 
-# Content type options - Gary Lin's 5 specific content types
-CONTENT_TYPES = [
-    "Founder's Personal Story & Journey",
-    "Internal Company Management & Culture", 
-    "Streamlining Data Delivery",
-    "Analytics Trends & Insights",
-    "Building a SaaS/AI Company"
-]
+def load_content_types() -> List[str]:
+    """Load content types from JSON file."""
+    content_types_file = "content_types.json"
+    
+    try:
+        if os.path.exists(content_types_file):
+            with open(content_types_file, 'r') as f:
+                data = json.load(f)
+                return data.get("content_types", [])
+        else:
+            # Create default file if it doesn't exist
+            default_types = [
+                "Founder Real Talk, building SaaS",
+                "Event Moments & Ecosystem Takes", 
+                "Memes & Fun",
+                "Team, Culture & Leadership",
+                "Analytics Insight",
+                "Explo product Updates"
+            ]
+            save_content_types(default_types)
+            return default_types
+    except Exception as e:
+        print(f"Error loading content types: {e}")
+        # Return fallback content types
+        return [
+            "Founder Real Talk, building SaaS",
+            "Event Moments & Ecosystem Takes",
+            "Memes & Fun", 
+            "Team, Culture & Leadership",
+            "Analytics Insight",
+            "Explo product Updates"
+        ]
+
+def save_content_types(content_types: List[str]) -> bool:
+    """Save content types to JSON file."""
+    content_types_file = "content_types.json"
+    
+    try:
+        data = {
+            "content_types": content_types,
+            "last_updated": datetime.utcnow().isoformat() + "Z",
+            "version": "1.0"
+        }
+        
+        with open(content_types_file, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        return True
+    except Exception as e:
+        print(f"Error saving content types: {e}")
+        return False
+
+def add_content_type(new_type: str) -> bool:
+    """Add a new content type."""
+    current_types = load_content_types()
+    if new_type not in current_types:
+        current_types.append(new_type)
+        return save_content_types(current_types)
+    return False
+
+def remove_content_type(type_to_remove: str) -> bool:
+    """Remove a content type."""
+    current_types = load_content_types()
+    if type_to_remove in current_types:
+        current_types.remove(type_to_remove)
+        return save_content_types(current_types)
+    return False
+
+def update_content_type(old_type: str, new_type: str) -> bool:
+    """Update an existing content type."""
+    current_types = load_content_types()
+    if old_type in current_types:
+        index = current_types.index(old_type)
+        current_types[index] = new_type
+        return save_content_types(current_types)
+    return False
+
+def reload_content_types() -> List[str]:
+    """Reload content types from file and update the global CONTENT_TYPES."""
+    global CONTENT_TYPES
+    CONTENT_TYPES = load_content_types()
+    return CONTENT_TYPES
+
+# Content type options - Gary Lin's 6 content verticals
+CONTENT_TYPES = load_content_types()
 
 # Default keywords for categorization
 DEFAULT_KEYWORDS = [

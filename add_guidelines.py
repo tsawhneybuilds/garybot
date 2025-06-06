@@ -23,7 +23,7 @@ def parse_markdown_guidelines(file_path: str, document_type: str = "general") ->
     
     Args:
         file_path: Path to the markdown file
-        document_type: Type of document (e.g., "hooks", "templates", "style_guide")
+        document_type: Type of document (e.g. "hooks", "templates", "style_guide")
     
     Returns:
         List of GuidelineDocument objects
@@ -65,10 +65,9 @@ def parse_markdown_guidelines(file_path: str, document_type: str = "general") ->
                 
                 if len(item) > 10:  # Only add substantial content
                     guideline = GuidelineDocument(
-                        id="",  # Will be auto-generated
                         title=f"{section_title} - Item",
                         content=item,
-                        document_type=document_type,
+                        hook_type=document_type,
                         section=section_title.lower().replace(' ', '_'),
                         priority=1
                     )
@@ -77,10 +76,9 @@ def parse_markdown_guidelines(file_path: str, document_type: str = "general") ->
             # Add entire section as one guideline
             if len(section_content) > 20:
                 guideline = GuidelineDocument(
-                    id="",  # Will be auto-generated
                     title=section_title,
                     content=section_content,
-                    document_type=document_type,
+                    hook_type=document_type,
                     section=section_title.lower().replace(' ', '_'),
                     priority=1
                 )
@@ -190,10 +188,9 @@ def add_linkedin_hooks_guidelines(rag_system: RAGSystem) -> List[str]:
     # Create guideline documents
     for hook in curiosity_hooks:
         guideline = GuidelineDocument(
-            id="",
             title="Curiosity Hook",
             content=hook,
-            document_type="hooks",
+            hook_type="curiosity",
             section="curiosity",
             priority=2  # High priority for hooks
         )
@@ -201,10 +198,9 @@ def add_linkedin_hooks_guidelines(rag_system: RAGSystem) -> List[str]:
     
     for hook in story_hooks:
         guideline = GuidelineDocument(
-            id="",
             title="Story Hook",
             content=hook,
-            document_type="hooks",
+            hook_type="storytelling",
             section="storytelling",
             priority=2
         )
@@ -212,10 +208,9 @@ def add_linkedin_hooks_guidelines(rag_system: RAGSystem) -> List[str]:
     
     for hook in provocative_hooks:
         guideline = GuidelineDocument(
-            id="",
             title="Provocative Hook",
             content=hook,
-            document_type="hooks",
+            hook_type="provocative",
             section="provocative",
             priority=2
         )
@@ -224,26 +219,23 @@ def add_linkedin_hooks_guidelines(rag_system: RAGSystem) -> List[str]:
     # Add Gary Lin specific style guidelines
     gary_style_guidelines = [
         GuidelineDocument(
-            id="",
             title="Gary Lin Voice Characteristics",
             content="Use bold, humorous, confident but not arrogant tone. Be people-first, empathetic, genuine, witty, vulnerable, raw, relatable, and provocative without being negative.",
-            document_type="style_guide",
+            hook_type="style_guide",
             section="voice",
             priority=3  # Highest priority
         ),
         GuidelineDocument(
-            id="",
             title="Gary Lin Content Types",
             content="Focus on founder philosophies, tough love advice, motivating rally cries, transparent reflections, and community-building content.",
-            document_type="style_guide",
+            hook_type="style_guide",
             section="content_types",
             priority=3
         ),
         GuidelineDocument(
-            id="",
             title="Gary Lin Writing Style",
             content="Use storytelling, short paragraphs for readability, strategic emojis (not excessive), and 1-3 relevant hashtags. Keep it authentic and conversational.",
-            document_type="style_guide",
+            hook_type="style_guide",
             section="formatting",
             priority=3
         )
@@ -293,7 +285,7 @@ def main():
     # Show breakdown by type
     type_counts = {}
     for guideline in all_guidelines:
-        doc_type = guideline.document_type
+        doc_type = guideline.hook_type
         type_counts[doc_type] = type_counts.get(doc_type, 0) + 1
     
     print("📋 Guidelines by type:")
